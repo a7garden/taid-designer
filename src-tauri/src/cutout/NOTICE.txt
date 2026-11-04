@@ -1,0 +1,39 @@
+Taid local automatic background removal
+
+Model: U2Netp (U²-Net portable salient-object segmentation)
+Authors: Xuebin Qin, Zichen Zhang, Chenyang Huang, Masood Dehghan,
+         Osmar R. Zaiane, Martin Jagersand.
+Model weights license: Apache License 2.0 (not rembg's MIT source-code license).
+Upstream: https://github.com/xuebinqin/U-2-Net
+License: https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE
+Model card: https://huggingface.co/edgetools/u2netp
+ONNX distribution: https://github.com/danielgatis/rembg/releases/tag/v0.0.0
+Exact file: https://github.com/danielgatis/rembg/releases/download/v0.0.0/u2netp.onnx
+SHA-256: 309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8
+File size: 4,574,861 bytes.
+
+The rembg release hosts an ONNX conversion. It does not relicense the weights.
+The exact original training-checkpoint/converter lineage of old rembg release
+assets is not independently documented. Taid pins the exact hosted bytes and
+identifies them in derivative provenance rather than asserting a verified
+conversion lineage.
+Licensing clarification: https://github.com/danielgatis/rembg/issues/837#issuecomment-5172958667
+
+Citation:
+Qin et al. "U2-Net: Going Deeper with Nested U-Structure for Salient Object
+Detection." Pattern Recognition 106 (2020), 107404.
+https://arxiv.org/abs/2005.09007
+
+Inference: Microsoft ONNX Runtime 1.22.0, MIT License.
+https://github.com/microsoft/onnxruntime/tree/v1.22.0
+https://github.com/microsoft/onnxruntime/blob/v1.22.0/LICENSE
+Rust binding: ort 2.0.0-rc.10, MIT OR Apache-2.0.
+https://github.com/pykeio/ort/tree/v2.0.0-rc.10
+
+Taid downloads weights only after an explicit cutout action. Inference runs on
+local CPU. No image bytes, project paths, prompts, or credentials are sent to
+the model download host. No API subscription, Python installation, or remote
+Python code is required. A 320x320 salient-object model cannot guarantee perfect
+pixel-art edges or identify the artist's intended foreground in every image.
+Derivatives retain canvas and RGB, multiply existing alpha by model coverage,
+preserve the source asset, and are not design/QC-approved automatically.

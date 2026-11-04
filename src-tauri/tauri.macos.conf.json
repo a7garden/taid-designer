@@ -1,0 +1,10 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "resources": {
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "src/cutout/NOTICE.txt": "CUTOUT_NOTICE.txt",
+      "../skills/taid-workbench/": "skills/taid-workbench/"
+    }
+  }
+}

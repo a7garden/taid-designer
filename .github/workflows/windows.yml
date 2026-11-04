@@ -1,0 +1,328 @@
+name: Windows x64
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'src-tauri/**'
+      - 'package*.json'
+      - 'index.html'
+      - 'vite.config.ts'
+      - 'tsconfig.json'
+      - 'app-icon.svg'
+      - 'scripts/build-windows.ps1'
+      - 'THIRD_PARTY_NOTICES.md'
+      - '.github/workflows/windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-x64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Test and package Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.local/windows-target
+      TAID_DATA_DIR: ${{ runner.temp }}/taid-windows-ci-data
+      CARGO_TERM_COLOR: always
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node 24
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Set up stable Rust MSVC
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw 'Rust installation failed.' }
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) { throw 'Rust toolchain selection failed.' }
+          rustc --version
+          cargo --version
+
+      - name: Install frontend dependencies
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'npm ci failed.' }
+
+      - name: Build frontend
+        run: |
+          npm run build
+          if ($LASTEXITCODE -ne 0) { throw 'Frontend build failed.' }
+
+      - name: Run Rust library tests
+        run: |
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --lib
+          if ($LASTEXITCODE -ne 0) { throw 'Rust library tests failed.' }
+
+      - name: Check Rust warnings
+        run: |
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --target x86_64-pc-windows-msvc --all-targets -- -D warnings
+          if ($LASTEXITCODE -ne 0) { throw 'Rust clippy failed.' }
+
+      - name: Build GUI, CLI and per-user NSIS installer
+        run: ./scripts/build-windows.ps1
+
+      - name: Smoke test the portable CLI
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $cli = Join-Path $env:CARGO_TARGET_DIR 'portable/taid.exe'
+          function Invoke-Taid([string[]]$Arguments) {
+            $stderrPath = Join-Path $env:RUNNER_TEMP 'taid-cli-stderr.log'
+            $lines = & $cli @Arguments 2> $stderrPath
+            $exitCode = $LASTEXITCODE
+            $diagnostics = Get-Content -LiteralPath $stderrPath -Raw -ErrorAction SilentlyContinue
+            if ($diagnostics) { Write-Host $diagnostics }
+            if ($exitCode -ne 0) { throw "CLI failed with exit ${exitCode}: $Arguments" }
+            try { $envelope = ($lines -join "`n") | ConvertFrom-Json }
+            catch { throw "CLI stdout was not a clean JSON envelope: $lines" }
+            if ($envelope.status -ne 'success') { throw "Unexpected CLI status: $lines" }
+            foreach ($field in @('summary', 'data', 'artifacts', 'nextActions')) {
+              if ($null -eq $envelope.PSObject.Properties[$field]) { throw "Missing JSON envelope field: $field" }
+            }
+            return $envelope
+          }
+          & $cli --help
+          if ($LASTEXITCODE -ne 0) { throw 'CLI help failed.' }
+          $null = Invoke-Taid -Arguments @('settings', 'set', '--model', 'ci-local-model', '--effort', 'low')
+          $settings = Invoke-Taid -Arguments @('settings', 'get')
+          if ($settings.data.model -ne 'ci-local-model' -or $settings.data.effort -ne 'low') { throw 'Settings did not persist.' }
+          $created = Invoke-Taid -Arguments @('project', 'create', '--parent', $env:RUNNER_TEMP, '--name', 'Taid Windows 검사')
+          $project = $created.data.root
+          if (-not (Test-Path -LiteralPath $project)) { throw 'CLI did not create the project.' }
+          $null = Invoke-Taid -Arguments @('project', 'open', $project)
+          $snapshot = Invoke-Taid -Arguments @('--project', $project, 'inspect')
+          if ($snapshot.data.root -ne $project -or $snapshot.data.profiles.Count -eq 0) { throw 'Project inspection failed.' }
+          $recent = Invoke-Taid -Arguments @('project', 'recent')
+          if (@($recent.data | Where-Object { $_.root -eq $project }).Count -ne 1) { throw 'Recent-project selection did not persist.' }
+          Add-Type -AssemblyName System.Drawing
+          $fixtureDirectory = Join-Path $env:RUNNER_TEMP 'taid-owned-synthetic-fixtures'
+          New-Item -ItemType Directory -Path $fixtureDirectory -Force | Out-Null
+          $carrotPath = Join-Path $fixtureDirectory 'ci-carrot.png'
+          $carrot = [Drawing.Bitmap]::new(320, 320, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+          $drawing = [Drawing.Graphics]::FromImage($carrot)
+          $orange = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(255, 239, 126, 25))
+          $green = [Drawing.SolidBrush]::new([Drawing.Color]::FromArgb(255, 60, 136, 41))
+          try {
+            $drawing.Clear([Drawing.Color]::White)
+            $drawing.SmoothingMode = [Drawing.Drawing2D.SmoothingMode]::AntiAlias
+            $drawing.FillPolygon($orange, [Drawing.Point[]]@([Drawing.Point]::new(98, 95), [Drawing.Point]::new(222, 95), [Drawing.Point]::new(160, 286)))
+            $drawing.FillEllipse($orange, 98, 68, 124, 64)
+            $drawing.FillPolygon($green, [Drawing.Point[]]@([Drawing.Point]::new(156, 82), [Drawing.Point]::new(123, 29), [Drawing.Point]::new(133, 23), [Drawing.Point]::new(169, 78)))
+            $drawing.FillPolygon($green, [Drawing.Point[]]@([Drawing.Point]::new(163, 79), [Drawing.Point]::new(186, 20), [Drawing.Point]::new(200, 26), [Drawing.Point]::new(177, 88)))
+            $drawing.FillPolygon($green, [Drawing.Point[]]@([Drawing.Point]::new(159, 79), [Drawing.Point]::new(153, 14), [Drawing.Point]::new(164, 10), [Drawing.Point]::new(170, 79)))
+            $carrot.Save($carrotPath, [Drawing.Imaging.ImageFormat]::Png)
+          }
+          finally { $drawing.Dispose(); $orange.Dispose(); $green.Dispose(); $carrot.Dispose() }
+          $imported = Invoke-Taid -Arguments @('--project', $project, 'import', $carrotPath, '--profile', 'generic')
+          $carrotAssets = @($imported.data.assets | Where-Object { $_.sourceName -eq 'ci-carrot.png' })
+          if ($carrotAssets.Count -ne 1) { throw 'Synthetic carrot import did not return exactly one asset.' }
+          $carrotAsset = $carrotAssets[0]
+          $carrotHash = (Get-FileHash -LiteralPath $carrotAsset.filePath -Algorithm SHA256).Hash
+          $beforeCutoutIds = @($imported.data.assets | ForEach-Object { $_.id })
+          $cutout = Invoke-Taid -Arguments @('--project', $project, 'cutout', '--ids', $carrotAsset.id)
+          $cutoutAssets = @($cutout.data.assets | Where-Object { $_.id -notin $beforeCutoutIds })
+          if ($cutoutAssets.Count -ne 1) { throw 'Cutout did not append exactly one variant.' }
+          $cutoutAsset = $cutoutAssets[0]
+          if ($cutoutAsset.designApproved -or $cutoutAsset.qcApproved) { throw 'Cutout incorrectly approved a synthetic variant.' }
+          $source = [Drawing.Bitmap]::new($carrotAsset.filePath)
+          $result = [Drawing.Bitmap]::new($cutoutAsset.filePath)
+          try {
+            if ($result.Width -ne 320 -or $result.Height -ne 320) { throw 'Cutout changed the source canvas.' }
+            if ($result.GetPixel(0, 0).A -ge 40) { throw 'Cutout retained the white background corner.' }
+            if ($result.GetPixel(160, 150).A -le 180) { throw 'Cutout removed the synthetic carrot foreground body.' }
+            for ($y = 0; $y -lt 320; $y++) {
+              for ($x = 0; $x -lt 320; $x++) {
+                $before = $source.GetPixel($x, $y)
+                $after = $result.GetPixel($x, $y)
+                if ($before.R -ne $after.R -or $before.G -ne $after.G -or $before.B -ne $after.B) { throw "Cutout changed source RGB at ($x,$y)." }
+              }
+            }
+          }
+          finally { $source.Dispose(); $result.Dispose() }
+          if ((Get-FileHash -LiteralPath $carrotAsset.filePath -Algorithm SHA256).Hash -ne $carrotHash) { throw 'Cutout modified its parent PNG.' }
+          $modelHash = '309c8469258dda742793dce0ebea8e6dd393174f89934733ecc8b14c76f4ddd8'
+          $modelPath = Join-Path $env:TAID_DATA_DIR "models/u2netp/$modelHash/u2netp.onnx"
+          if ((Get-Item -LiteralPath $modelPath).Length -ne 4574861 -or (Get-FileHash -LiteralPath $modelPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $modelHash) { throw 'Real U2Netp model cache did not match the pinned bytes.' }
+
+          $tilePath = Join-Path $fixtureDirectory 'ci-tile.png'
+          $tile = [Drawing.Bitmap]::new(32, 32, [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+          try {
+            for ($y = 0; $y -lt 32; $y++) {
+              for ($x = 0; $x -lt 32; $x++) {
+                $color = if (($x -lt 16) -xor ($y -lt 16)) { [Drawing.Color]::FromArgb(255, 231, 57, 70) } else { [Drawing.Color]::FromArgb(255, 52, 155, 85) }
+                $tile.SetPixel($x, $y, $color)
+              }
+            }
+            $tile.Save($tilePath, [Drawing.Imaging.ImageFormat]::Png)
+          }
+          finally { $tile.Dispose() }
+          $tileImport = Invoke-Taid -Arguments @('--project', $project, 'import', $tilePath, '--profile', 'generic')
+          $tileAssets = @($tileImport.data.assets | Where-Object { $_.sourceName -eq 'ci-tile.png' })
+          if ($tileAssets.Count -ne 1) { throw 'Synthetic tile import did not return exactly one asset.' }
+          $tileAsset = $tileAssets[0]
+          $tileHash = (Get-FileHash -LiteralPath $tileAsset.filePath -Algorithm SHA256).Hash
+          $paletteReport = Invoke-Taid -Arguments @('--project', $project, 'palette', 'inspect', '--asset', $tileAsset.id)
+          if ($paletteReport.data.colorCount -ne 2 -or $paletteReport.data.visiblePixels -ne 1024) { throw 'Palette inspection did not read the actual two-color PNG.' }
+          $palettePath = Join-Path $fixtureDirectory 'ci-palette.hex'
+          [IO.File]::WriteAllText($palettePath, "#FF0000`n#00FF00`n", [Text.UTF8Encoding]::new($false))
+          $paletteImported = Invoke-Taid -Arguments @('--project', $project, 'palette', 'import', '--file', $palettePath, '--profile', 'generic')
+          $savedProfile = @($paletteImported.data.profiles | Where-Object { $_.id -eq 'generic' })[0]
+          if (@($savedProfile.palette).Count -ne 2 -or '#FF0000' -notin $savedProfile.palette -or '#00FF00' -notin $savedProfile.palette) { throw 'Palette import did not persist the requested RGB colors.' }
+          $outside = Invoke-Taid -Arguments @('--project', $project, 'palette', 'inspect', '--asset', $tileAsset.id)
+          if ($outside.data.outsideColors -ne 2 -or $outside.data.outsidePixels -ne 1024) { throw 'Palette inspection did not identify colors outside the imported palette.' }
+          $beforeMapIds = @($paletteImported.data.assets | ForEach-Object { $_.id })
+          $mapped = Invoke-Taid -Arguments @('--project', $project, 'palette', 'map', '--ids', $tileAsset.id)
+          $mappedAssets = @($mapped.data.assets | Where-Object { $_.id -notin $beforeMapIds })
+          if ($mappedAssets.Count -ne 1) { throw 'Palette mapping did not append exactly one variant.' }
+          $mappedAsset = $mappedAssets[0]
+          if ($mappedAsset.designApproved -or $mappedAsset.qcApproved) { throw 'Palette mapping incorrectly approved a synthetic variant.' }
+          $mappedReport = Invoke-Taid -Arguments @('--project', $project, 'palette', 'inspect', '--asset', $mappedAsset.id)
+          if ($mappedReport.data.outsideColors -ne 0 -or $mappedReport.data.colorCount -ne 2) { throw 'Mapped PNG colors did not match the imported palette.' }
+          $beforeTileIds = @($mapped.data.assets | ForEach-Object { $_.id })
+          $tiled = Invoke-Taid -Arguments @('--project', $project, 'tile', '--ids', $mappedAsset.id, '--width', '32', '--height', '32', '--scale', '2', '--mode', 'fit', '--anchor', 'bottom-center')
+          $tiledAssets = @($tiled.data.assets | Where-Object { $_.id -notin $beforeTileIds })
+          if ($tiledAssets.Count -ne 1) { throw 'Tile operation did not append exactly one variant.' }
+          $tiledAsset = $tiledAssets[0]
+          $tileProfile = @($tiled.data.profiles | Where-Object { $_.id -eq $tiledAsset.profileId })[0]
+          if ($tiledAsset.width -ne 64 -or $tiledAsset.height -ne 64 -or $tileProfile.pixelSize -ne 2 -or $tileProfile.width -ne 64 -or $tileProfile.height -ne 64 -or $tileProfile.id -eq $mappedAsset.profileId) { throw 'Tile did not create a scoped 64x64, pixel-size-2 profile and asset.' }
+          if ($tiledAsset.designApproved -or $tiledAsset.qcApproved) { throw 'Tile operation incorrectly approved a synthetic variant.' }
+          $tileSource = [Drawing.Bitmap]::new($mappedAsset.filePath)
+          $tileResult = [Drawing.Bitmap]::new($tiledAsset.filePath)
+          try {
+            if ($tileResult.Width -ne 64 -or $tileResult.Height -ne 64) { throw 'Tile PNG dimensions differ from its manifest.' }
+            for ($y = 0; $y -lt 64; $y++) {
+              for ($x = 0; $x -lt 64; $x++) {
+                if ($tileResult.GetPixel($x, $y).ToArgb() -ne $tileSource.GetPixel([int][Math]::Floor($x / 2), [int][Math]::Floor($y / 2)).ToArgb()) { throw "Tile scale was not exact nearest-neighbor at ($x,$y)." }
+              }
+            }
+          }
+          finally { $tileSource.Dispose(); $tileResult.Dispose() }
+          if ((Get-FileHash -LiteralPath $tileAsset.filePath -Algorithm SHA256).Hash -ne $tileHash) { throw 'Palette/tile operations modified the original parent PNG.' }
+          Write-Host 'Synthetic cutout (real pinned model), palette inspect/import/map and exact 2x nearest-neighbor tile smoke passed.'
+          $failurePath = Join-Path $env:RUNNER_TEMP 'taid-expected-error.json'
+          $unexpectedOutput = & $cli inspect 2> $failurePath
+          if ($LASTEXITCODE -ne 1) { throw 'Missing-project error did not exit 1.' }
+          if ($unexpectedOutput) { throw 'CLI error unexpectedly wrote to stdout.' }
+          $failure = Get-Content -LiteralPath $failurePath -Raw | ConvertFrom-Json
+          if ($failure.status -ne 'error') { throw 'CLI error was not a JSON error envelope.' }
+          foreach ($relative in @('portable/windows-artifacts.json', 'x86_64-pc-windows-msvc/release/bundle/nsis/windows-artifacts.json')) {
+            $manifestPath = Join-Path $env:CARGO_TARGET_DIR $relative
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $manifest.cliRuntimeVerified = $true
+            $manifest | Add-Member -NotePropertyName cliRuntimeVerificationScope -NotePropertyValue 'settings/project/errors; synthetic cutout with pinned real U2Netp; palette inspect/import/map; exact nearest-neighbor tile'
+            [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5) + "`n", [Text.UTF8Encoding]::new($false))
+          }
+          $global:LASTEXITCODE = 0
+          Write-Output 'Windows CLI smoke passed.'
+
+      - name: Smoke test GUI startup, window and graceful close
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Registry detection only; never download or install WebView2 in this smoke.
+          # https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution
+          $runtimeKeys = @(
+            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}',
+            'HKCU:\Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
+          )
+          $runtimes = @(foreach ($key in $runtimeKeys) {
+            $version = Get-ItemPropertyValue -LiteralPath $key -Name pv -ErrorAction SilentlyContinue
+            if (-not [string]::IsNullOrWhiteSpace($version) -and [version]$version -gt [version]'0.0.0.0') {
+              [pscustomobject]@{ registryKey = $key; version = $version }
+            }
+          })
+          Write-Output ('Existing WebView2 runtimes: ' + (ConvertTo-Json -InputObject $runtimes -Compress))
+          if ($runtimes.Count -eq 0) {
+            'WebView2 runtime not found; GUI smoke blocked. No runtime download, installation or terms acceptance was attempted.' | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+            throw 'The runner needs a preinstalled WebView2 Runtime; this workflow will not acquire it.'
+          }
+          $gui = Join-Path $env:CARGO_TARGET_DIR 'portable/taid-designer.exe'
+          $app = $null
+          try {
+            $app = Start-Process -FilePath $gui -WorkingDirectory (Split-Path -Parent $gui) -PassThru
+            $startup = [Diagnostics.Stopwatch]::StartNew()
+            $windowObserved = $false
+            while ($startup.Elapsed.TotalSeconds -lt 30) {
+              $app.Refresh()
+              if ($app.HasExited) { throw "GUI exited before a window appeared (exit $($app.ExitCode))." }
+              if ($app.MainWindowHandle -ne [IntPtr]::Zero -and -not [string]::IsNullOrWhiteSpace($app.MainWindowTitle)) {
+                $windowObserved = $true
+                $windowTitle = $app.MainWindowTitle
+                $windowHandle = $app.MainWindowHandle.ToInt64()
+                break
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            if (-not $windowObserved) { throw 'GUI did not expose a nonzero main-window handle and title within 30 seconds.' }
+            Write-Output "Observed GUI window: handle=$windowHandle title=$windowTitle"
+            if (-not $app.CloseMainWindow()) { throw 'GUI rejected the graceful close request.' }
+            if (-not $app.WaitForExit(15000)) { throw 'GUI did not exit gracefully within 15 seconds.' }
+            if ($app.ExitCode -ne 0) { throw "GUI exited abnormally after close (exit $($app.ExitCode))." }
+          }
+          finally {
+            if ($null -ne $app) {
+              if (-not $app.HasExited) { Stop-Process -Id $app.Id -Force -ErrorAction SilentlyContinue }
+              $app.Dispose()
+            }
+          }
+          foreach ($relative in @('portable/windows-artifacts.json', 'x86_64-pc-windows-msvc/release/bundle/nsis/windows-artifacts.json')) {
+            $manifestPath = Join-Path $env:CARGO_TARGET_DIR $relative
+            $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+            $manifest.guiRuntimeVerified = $true
+            $manifest | Add-Member -NotePropertyName guiRuntimeVerificationScope -NotePropertyValue 'startup/window/close'
+            $manifest | Add-Member -NotePropertyName webView2Runtimes -NotePropertyValue $runtimes
+            [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5) + "`n", [Text.UTF8Encoding]::new($false))
+          }
+          Write-Output 'Windows GUI startup/window/close smoke passed; artwork interactions and installer execution remain untested.'
+
+      - name: Upload portable GUI and CLI
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Taid-Windows-x64-portable
+          path: .local/windows-target/portable/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: Taid-Windows-x64-installer
+          path: .local/windows-target/x86_64-pc-windows-msvc/release/bundle/nsis/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+      - name: Record verification scope
+        run: |
+          @'
+          ## Windows x64 artifacts
+          - Built natively on GitHub's Windows runner with the MSVC target.
+          - Rust library tests, clippy, portable CLI smoke and GUI startup/window/close smoke completed before upload.
+          - CLI exercised owned synthetic PNGs: actual pinned U2Netp cutout (canvas/RGB preserved, foreground/background alpha checked), palette inspect/import/map, and exact 2x nearest-neighbor tile with a scoped 64x64/pixel-size-2 profile.
+          - `Taid-Windows-x64-portable`: GUI, CLI, emitted DLLs, cutout/available third-party notices and SHA-256/PE manifest.
+          - `Taid-Windows-x64-installer`: per-user NSIS installer with emitted runtime DLLs and notices; WebView2 download requires internet if the runtime is absent.
+          - GUI scope is only startup/window/close with an observed nonzero main-window handle and nonempty title; artwork interactions, installer execution and a clean Windows 10/11 machine remain unverified.
+          - Unsigned artifacts may trigger Windows SmartScreen; this workflow does not sign or publish releases.
+          '@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
