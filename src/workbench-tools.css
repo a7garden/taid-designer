@@ -1,0 +1,65 @@
+.workbench-tool,
+.workbench-inspector {
+  --tool-rule: var(--line, #e4e4e7);
+  --tool-secondary: var(--muted, #71717a);
+  min-width: 0;
+  font-size: 13px;
+}
+
+.tile-tools.workbench-tool { border: 0; margin: 0; padding: 0; }
+.workbench-tool .section-heading { margin-bottom: 14px; }
+.workbench-tool .section-heading h3 { margin: 0; }
+.workbench-tool .tool-fieldset { min-width: 0; border: 0; padding: 0; margin: 0 0 18px; }
+.workbench-tool .tool-fieldset legend { padding: 0; margin-bottom: 9px; font-size: 12px; font-weight: 600; }
+.workbench-tool .tool-fieldset .field { margin-bottom: 0; }
+.workbench-tool .tool-segmented { display: flex; gap: 0; width: 100%; margin-bottom: 12px; border: 1px solid var(--tool-rule); border-radius: 8px; padding: 3px; background: #f5f5f5; }
+.workbench-tool .tool-segmented .button { flex: 1; min-width: 0; min-height: 32px; font-size: 12px; padding: 5px 7px; border: 1px solid transparent; border-radius: 5px; color: var(--tool-secondary); background: transparent; box-shadow: none; }
+.workbench-tool .tool-segmented .button[aria-pressed="true"] { background: #fff; border-color: #dedee0; color: #242428; box-shadow: 0 1px 2px #00000008; }
+.workbench-tool .tool-segmented .button:hover:not(:disabled) { color: #242428; }
+.workbench-tool .tool-dimensions { display: flex; flex-direction: column; gap: 4px; padding: 15px 0; border-block: 1px solid var(--tool-rule); font-size: 12px; color: var(--tool-secondary); font-variant-numeric: tabular-nums; }
+.workbench-tool .tool-dimensions strong { font-size: 22px; font-weight: 500; color: var(--text, #242428); letter-spacing: -.5px; overflow-wrap: anywhere; }
+.workbench-tool .tool-inline-note { color: var(--tool-secondary); font-size: 12px; line-height: 1.6; margin: 10px 0 14px; overflow-wrap: anywhere; }
+.workbench-tool .tool-inline-note > span { display: block; }
+
+.workbench-inspector .tool-operation-list { margin-bottom: 18px; }
+.workbench-inspector .tool-operation-list .check-field { align-items: center; min-height: 44px; padding: 10px 0; margin: 0; border-bottom: 1px solid var(--tool-rule); }
+.workbench-inspector .tool-operation-list .check-field:first-child { border-top: 1px solid var(--tool-rule); }
+.workbench-inspector .tool-operation-list .check-field > input { margin-top: 0; }
+
+:is(.workbench-tool, .workbench-inspector) .tool-disclosure { border-top: 1px solid var(--tool-rule); padding: 12px 0; margin: 0; }
+:is(.workbench-tool, .workbench-inspector) .tool-disclosure > summary { cursor: pointer; color: var(--tool-secondary); font-size: 12px; line-height: 1.7; }
+:is(.workbench-tool, .workbench-inspector) .tool-disclosure[open] > summary { margin-bottom: 14px; color: var(--text, #242428); }
+:is(.workbench-tool, .workbench-inspector) .tool-disclosure > p,
+:is(.workbench-tool, .workbench-inspector) .tool-explanations { color: var(--tool-secondary); font-size: 12px; line-height: 1.65; margin: 8px 0 12px; }
+.workbench-inspector .metadata-disclosure { margin-bottom: 14px; }
+.workbench-inspector .tool-explanations dt { color: var(--text, #242428); margin-top: 10px; }
+.workbench-inspector .tool-explanations dd { margin: 3px 0 0; }
+
+:is(.workbench-tool, .workbench-inspector) .tool-action-footer { position: sticky; bottom: -28px; z-index: 3; border-top: 1px solid var(--tool-rule); margin-top: 16px; padding: 14px 0 16px; background: var(--surface); box-shadow: 0 -10px 16px -16px #27324640; }
+:is(.workbench-tool, .workbench-inspector) .tool-action-summary { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 12px; line-height: 1.6; }
+:is(.workbench-tool, .workbench-inspector) .tool-action-summary strong { font-size: 13px; font-weight: 600; }
+:is(.workbench-tool, .workbench-inspector) .tool-action-summary > span { color: var(--tool-secondary); }
+:is(.workbench-tool, .workbench-inspector) .tool-caution { margin: 10px 0 12px; color: var(--tool-secondary); font-size: 12px; line-height: 1.65; overflow-wrap: anywhere; }
+:is(.workbench-tool, .workbench-inspector) .tool-success { display: flex; align-items: flex-start; gap: 6px; margin: 11px 0 0; color: var(--success, #347357); font-size: 12px; line-height: 1.6; }
+:is(.workbench-tool, .workbench-inspector) .tool-success > svg { flex: 0 0 auto; margin-top: 2px; }
+:is(.workbench-tool, .workbench-inspector) .tool-text-button { border: 0; background: transparent; min-height: 30px; padding: 4px 0; color: var(--tool-secondary); font-size: 12px; box-shadow: none; }
+:is(.workbench-tool, .workbench-inspector) .tool-text-button:hover:not(:disabled) { border: 0; background: transparent; color: var(--text, #242428); text-decoration: underline; text-underline-offset: 3px; }
+.workbench-inspector .tool-targets { margin: 0 0 12px; font-size: 12px; color: var(--tool-secondary); }
+.workbench-inspector .tool-targets summary { cursor: pointer; }
+.workbench-inspector .tool-targets ul { max-height: 110px; overflow: auto; margin: 8px 0 0; padding-left: 18px; line-height: 1.7; overflow-wrap: anywhere; }
+.workbench-inspector .tool-reset { margin-top: 24px; }
+
+.palette-tools.workbench-tool .palette-count { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; margin: 0 0 12px; font-variant-numeric: tabular-nums; }
+.palette-tools.workbench-tool .palette-count strong { font-size: 20px; font-weight: 500; letter-spacing: -.4px; }
+.palette-tools.workbench-tool .palette-count > span { color: var(--tool-secondary); font-size: 12px; }
+.palette-tools.workbench-tool .palette-swatches { margin: 10px 0 14px; gap: 5px; }
+.palette-tools.workbench-tool .actual-palette-swatches > span { width: 25px; height: 25px; border-radius: 4px; }
+.palette-tools.workbench-tool .palette-profile-section { border-top: 1px solid var(--tool-rule); margin-top: 14px; padding-top: 18px; }
+.palette-tools.workbench-tool .palette-profile-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--tool-secondary); font-size: 12px; }
+.palette-tools.workbench-tool .palette-tool-actions { margin-bottom: 14px; gap: 6px; }
+.palette-tools.workbench-tool .palette-tool-actions .button { font-size: 12px; min-height: 34px; }
+.palette-tools.workbench-tool .palette-color-row { grid-template-columns: 18px 68px minmax(0, 1fr) 44px; gap: 6px; }
+.palette-tools.workbench-tool .palette-color-row > :last-child { text-align: right; }
+.palette-tools.workbench-tool .palette-histogram { margin: 10px 0 0; }
+.palette-tools.workbench-tool .palette-editor { margin-top: 8px; }
+.palette-tools.workbench-tool .palette-editor .tool-caution { color: var(--tool-secondary); }

@@ -21,7 +21,9 @@ type Props = {
 };
 
 export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportError, onRunning, onDirty, request, onRequestHandled, onOpenModelSettings }: Props) {
-  const [tab, setTab] = useState<'review' | 'resource' | 'process' | 'palette'>('review');
+  const [tab, setTab] = useState<'review' | 'resource' | 'tools'>('review');
+  const [tool, setTool] = useState<'pixel' | 'tile' | 'palette' | 'cutout'>('pixel');
+  const [tileDirty, setTileDirty] = useState(false);
   const [status, setStatus] = useState<CodexStatus | null>(null);
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [models, setModels] = useState<CodexModel[]>([]);
@@ -98,7 +100,7 @@ export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportEr
     return () => { disposed = true; mounted.current = false; dispose?.(); window.removeEventListener('focus', focus); };
   }, [refresh]);
   useEffect(() => { onRunning(running || !!status?.busy); }, [running, status?.busy, onRunning]);
-  useEffect(() => { onDirty(inspectorDirty || paletteDirty || question !== sentQuestion); }, [inspectorDirty, paletteDirty, question, sentQuestion, onDirty]);
+  useEffect(() => { onDirty(inspectorDirty || paletteDirty || tileDirty || question !== sentQuestion); }, [inspectorDirty, paletteDirty, tileDirty, question, sentQuestion, onDirty]);
 
   const targetIds = selectedIds.length ? selectedIds : asset ? [asset.id] : [];
   const targets = reviewAssets(workspace, targetIds);
@@ -204,17 +206,18 @@ export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportEr
   }
 
   return <aside className="review-dock" aria-label="이미지 검토">
-    <header className="review-heading"><h2>검토</h2><p className="review-state" data-state={activeReview?.phase || 'local'} aria-live="polite">{stateLabel}</p></header>
-    {asset && <CutoutControl ids={targetIds} busy={busy || running} run={run} reportError={reportError} />}
+    <header className="review-heading"><h2 title={asset?.name}>{asset?.name ?? '에셋'}</h2>{asset && <span>{asset.width} × {asset.height}</span>}</header>
     <div className="review-tabs" role="tablist" aria-label="검토와 에셋 도구">
-      {([['review', '검토'], ['resource', '정보'], ['process', '픽셀·타일'], ['palette', '팔레트']] as const).map(([id, label]) => <button key={id} id={`review-tab-${id}`} role="tab" aria-selected={tab === id} aria-controls={`review-panel-${id}`} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}{((id === 'resource' || id === 'process') && inspectorDirty || id === 'palette' && paletteDirty) && <span className="dirty-dot" aria-label="저장 전 편집 있음" />}</button>)}
+      {([['review', '검토'], ['tools', '정리'], ['resource', '정보']] as const).map(([id, label]) => <button key={id} id={`review-tab-${id}`} role="tab" aria-selected={tab === id} aria-controls={`review-panel-${id}`} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}{((id === 'resource' && inspectorDirty) || (id === 'tools' && (inspectorDirty || paletteDirty || tileDirty))) && <span className="dirty-dot" aria-label="저장 전 편집 있음" />}</button>)}
     </div>
-    <div className="review-body">
-      <div id="review-panel-review" role="tabpanel" aria-labelledby="review-tab-review" hidden={tab !== 'review'}>
+    <div className="review-body" id={`review-panel-${tab}`} role="tabpanel" aria-labelledby={`review-tab-${tab}`}>
+      <div hidden={tab !== 'review'}>
         {!asset ? <Empty title="이미지를 선택하세요"><p>가져온 파일의 로컬 검사와 AI 검토를 여기서 확인합니다.</p></Empty> : <section className="local-checks">
           <div className="review-section-heading"><h3>파일 검사</h3><span className="muted">로컬 · 자동</span></div>
-          <p className="local-check-summary">{asset.width} × {asset.height} px · {workspace.profiles.find(profile => profile.id === asset.profileId)?.name ?? '제작 기준 없음'}</p>
-          {asset.issues.length ? <><p className="local-check-count">{errors.length ? `오류 ${errors.length}개` : '오류 없음'}{warnings.length ? ` · 주의 ${warnings.length}개` : ''}</p><ul className="issue-list">{asset.issues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}><div className="issue-title"><AlertTriangle size={14} /><strong>{issue.severity === 'error' ? '오류' : '주의'}</strong><code>{issue.code}</code></div><p>{issue.message}</p>{issue.pixels > 0 && <span>{formatNumber(issue.pixels)} {issue.code === 'palette-variants' ? '색상 변형' : issue.code === 'isolated-dots' ? '논리 도트' : '픽셀'} · 로컬 측정</span>}</li>)}</ul></> : <p className="inspection-clear"><Check size={15} />저장된 파일 규칙에서 감지된 문제 없음</p>}
+          <p className="review-state" data-state={activeReview?.phase || 'local'} aria-live="polite">{stateLabel}</p>
+          <p className="local-check-summary">{workspace.profiles.find(profile => profile.id === asset.profileId)?.name ?? '제작 기준 없음'}</p>
+          {asset.issues.length ? <details className="local-issue-details" open={errors.length > 0 || undefined}><summary><AlertTriangle size={14} />{errors.length ? `오류 ${errors.length}개` : '오류 없음'}{warnings.length ? ` · 주의 ${warnings.length}개` : ''}<span>상세</span></summary><ul className="issue-list">{asset.issues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}><div className="issue-title"><strong>{issue.severity === 'error' ? '오류' : '주의'}</strong><code>{issue.code}</code></div><p>{issue.message}</p>{issue.pixels > 0 && <span>{formatNumber(issue.pixels)} {issue.code === 'palette-variants' ? '색상 변형' : issue.code === 'isolated-dots' ? '논리 도트' : '픽셀'} · 로컬 측정</span>}</li>)}</ul></details> : <p className="inspection-clear"><Check size={15} />파일 규칙 통과</p>}
+          {errors.some(issue => issue.code === 'grid' || issue.code === 'alpha' || issue.code === 'palette') && <button className="button small" onClick={() => { setTool(errors.some(issue => issue.code === 'grid' || issue.code === 'alpha') ? 'pixel' : 'palette'); setTab('tools'); }}>정리 도구 열기</button>}
           <details className="technical-details"><summary>실제 픽셀 검사 수치</summary><p className="helper">크기·알파·팔레트·픽셀 규칙 검사입니다. 그림의 스타일이나 형태를 AI가 판단한 결과는 아닙니다.</p><dl className="metrics-list"><div><dt>사용 색상</dt><dd>{formatNumber(asset.metrics.colors)}</dd></div><div><dt>반투명 픽셀</dt><dd>{formatNumber(asset.metrics.semiTransparent)}</dd></div><div><dt>불투명 픽셀</dt><dd>{formatNumber(asset.metrics.opaque)}</dd></div><div><dt>그리드 이탈 픽셀</dt><dd>{formatNumber(asset.metrics.gridViolations)}</dd></div></dl></details>
           <details className="technical-details pixel-guide"><summary>픽셀아트 검수 가이드</summary><ol><li>먼저 제작 기준의 도트 크기와 실제 격자를 맞춥니다.</li><li>승인 팔레트와 사용 색을 대조합니다. 색 수 자체가 합격·불합격 기준은 아닙니다.</li><li>고립 도트는 잡티 후보입니다. 눈·별·하이라이트·수동 안티앨리어싱은 의도한 표현일 수 있습니다.</li><li>1× 보기와 다른 에셋 위에서 비교합니다. 실제 게임 표시 크기는 Unity에서도 확인하세요.</li></ol><dl className="metrics-list"><div><dt>RGB444 근사 색상 변형</dt><dd>{formatNumber(asset.metrics.nearColorVariants ?? 0)}</dd></div><div><dt>고립 색상 도트 후보</dt><dd>{asset.metrics.orphanCheckApplied ? `${formatNumber(asset.metrics.isolatedColorDots ?? 0)} / ${formatNumber(asset.metrics.visibleLogicalDots ?? 0)}도트` : '격자 정리 후 검사'}</dd></div></dl><p className="helper">RGB444는 가까운 색을 묶는 근사 지표이며 지각적 유사도나 그림 품질 판정이 아닙니다. 참고: Imagine Dev 「이 픽셀아트, 사실 가짜입니다」.</p></details>
         </section>}
@@ -222,13 +225,13 @@ export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportEr
           <div className="review-section-heading"><h3>AI 이미지 검토</h3><button className="icon-button" disabled={busy || running || refreshing} aria-label="Codex 연결과 모델 상태 새로고침" title="연결 상태 새로고침" onClick={() => void refresh()}><RefreshCw size={14} /></button></div>
           <button className="review-model" disabled={running || busy} onClick={onOpenModelSettings}><Settings2 size={14} /><span>{modelLabel}</span></button>
           <div className="review-disclosure">
-            <p><strong>{selectedIds.length ? '선택 이미지' : '현재 이미지'} {targetIds.length}개</strong>와 저장된 기준·메타데이터·메모·파일 검사·질문을 Codex에 전송하며 계정 사용량을 소비합니다. 파일 수정·생성·자동 승인은 없습니다.</p>
-            <details className="review-send-details"><summary>전송 대상·내용 확인{targets.length === 1 ? ` · ${targets[0].name}.png` : ` · 이미지 ${targetIds.length}개`}</summary><ul className="review-attachments">{targets.map((item, index) => <li key={`${item.id}-${index}`}><span>{index + 1}.</span> {item.name}.png <small>{workspace.profiles.find(profile => profile.id === item.profileId)?.name ?? '기준 없음'}</small></li>)}</ul><p className="helper">각 이미지의 저장된 제작 기준, 파일명·해시·프레임·피벗 등 메타데이터, 에셋 메모·프로젝트 메모, 실제 파일 검사 수치와 추가 질문을 기존 Codex 제공자에게 보냅니다. 저장 전 편집 내용은 제외합니다. 사용량·과금은 기존 Codex 계정 설정을 따릅니다.</p></details>
+            <p>{selectedIds.length ? '선택' : '현재'} {targetIds.length}개와 저장된 기준을 Codex에 전송 · 계정 사용량 소비</p>
+            <details className="review-send-details"><summary>전송 내용·대상</summary><ul className="review-attachments">{targets.map((item, index) => <li key={`${item.id}-${index}`}><span>{index + 1}.</span> {item.name}.png <small>{workspace.profiles.find(profile => profile.id === item.profileId)?.name ?? '기준 없음'}</small></li>)}</ul><p className="helper">이미지·저장된 기준·파일명·해시·프레임·피벗·메모·파일 검사 수치·추가 질문을 기존 Codex 제공자에게 보냅니다. 저장 전 편집은 제외합니다. 사용량·과금은 기존 계정 설정을 따르며 파일 수정·생성·자동 승인은 없습니다.</p></details>
           </div>
           <details className="review-question-details" open={!!question || undefined}><summary>추가 검토 질문 (선택)</summary><Field label="추가 질문" className="review-question"><textarea rows={2} value={question} disabled={running} onChange={event => setQuestion(event.target.value)} placeholder="예: 달리기 프레임 사이에 팔 길이가 달라 보이는지" /></Field>{question && <button className="button small" disabled={running} onClick={() => { setQuestion(''); setSentQuestion(''); }}>추가 질문 지우기</button>}</details>
           <div className="review-connection">
             {!status && !connectionError && <p className="helper">Codex 설치·로그인 상태 확인 중…</p>}
-            {status && <p className="helper">{status.authenticated ? `Codex 연결 · ${status.account || '인증된 계정'}` : 'Codex 계정 연결 필요'}{status.busy && !running ? ' · 다른 요청 실행 중' : ''}</p>}
+            {status && !status.authenticated && <p className="helper">Codex 계정 연결 필요</p>}
             {status && !status.installed && <p className="inline-error">공식 Codex CLI를 설치한 뒤 새로고침하세요. 별도 API 키를 앱에 넣지 않습니다.</p>}
             {status?.installed && !status.authenticated && <p className="inline-error">터미널에서 <code>codex login</code>으로 연결한 뒤 위 새로고침을 누르세요. 앱이 대신 로그인하지 않습니다.</p>}
             {(connectionError || status?.error || listenerError) && <p className="inline-error" role="alert">{connectionError || status?.error || `Codex 응답 수신 연결 실패: ${listenerError}`}</p>}
@@ -251,20 +254,22 @@ export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportEr
           </section>}
         </section>
         <section className="approval-section">
-          <div className="review-section-heading"><h3>사람의 최종 승인</h3><span className="muted">{selectedIds.length ? '선택' : '현재'} {targetIds.length}개</span></div>
-          <p className="helper">{targets.map(item => `${item.name}.png`).join(', ') || '승인할 이미지를 선택하세요.'}</p>
-          <p className="helper">그림·움직임은 디자인 승인, 파일 규칙은 QC 승인으로 각각 확인합니다. 디자인 승인 변경 시 대상의 QC 승인은 해제됩니다.</p>
-          <button className={`button approval-button ${allDesign ? 'approved' : ''}`} disabled={busy || approvalBlocked} onClick={() => void run('선택 이미지 디자인 승인 변경', () => api.approveAssets(targetIds, !allDesign, false))}><Check size={15} />{selectedIds.length ? '선택' : '현재'} {targetIds.length}개 디자인 {allDesign ? '승인 취소' : '승인'}</button>
-          <button className={`button approval-button ${allQc ? 'approved' : ''}`} disabled={busy || approvalBlocked || (!allQc && !!qcReason)} onClick={() => void run('선택 이미지 QC 승인 변경', () => api.approveAssets(targetIds, true, !allQc))}><CheckCheck size={15} />{selectedIds.length ? '선택' : '현재'} {targetIds.length}개 QC {allQc ? '승인 취소' : '승인'}</button>
-          {qcReason && <p className="helper">{qcReason}</p>}
-          {!!references && <p className="helper">참고용 이미지는 승인·전달 대상이 아닙니다.</p>}
+          <div className="review-section-heading"><h3>최종 승인</h3><span className="muted">{selectedIds.length ? '선택' : '현재'} {targetIds.length}개</span></div>
+          <div className="approval-steps">
+            <button className={`button approval-button ${allDesign ? 'approved' : ''}`} disabled={busy || approvalBlocked} onClick={() => void run('선택 이미지 디자인 승인 변경', () => api.approveAssets(targetIds, !allDesign, false))}><Check size={15} />{allDesign ? '디자인 승인됨' : '디자인 승인'}</button>
+            <button className={`button approval-button ${allQc ? 'approved' : ''}`} disabled={busy || approvalBlocked || (!allQc && !!qcReason)} onClick={() => void run('선택 이미지 QC 승인 변경', () => api.approveAssets(targetIds, true, !allQc))}><CheckCheck size={15} />{allQc ? 'QC 승인됨' : 'QC 승인'}</button>
+          </div>
+          {qcReason && <p className="helper compact">{qcReason}</p>}
+          <details className="technical-details"><summary>승인 대상·안내</summary><p className="helper">{targets.map(item => `${item.name}.png`).join(', ') || '이미지를 선택하세요.'}</p><p className="helper">그림·움직임과 파일 규칙을 각각 확인하세요. 승인된 버튼을 다시 누르면 취소합니다. 디자인 승인을 바꾸면 QC 승인이 해제됩니다. 참고용 이미지는 승인·전달에서 제외합니다.</p></details>
         </section>
       </div>
-      <div className="review-advanced" id={`review-panel-${tab === 'process' ? 'process' : 'resource'}`} role="tabpanel" aria-labelledby={`review-tab-${tab === 'process' ? 'process' : 'resource'}`} hidden={tab !== 'resource' && tab !== 'process'}>
-        <Inspector workspace={workspace} asset={asset} selectedIds={selectedIds} busy={busy || running} run={run} onDirty={setInspectorDirty} mode={tab === 'process' ? 'process' : 'resource'} />
-        {tab === 'process' && <TileTools workspace={workspace} asset={asset} selectedIds={selectedIds} busy={busy || running} run={run} reportError={reportError} />}
+      <div className="tool-picker" hidden={tab !== 'tools'}><label htmlFor="asset-tool">작업</label><select id="asset-tool" value={tool} onChange={event => setTool(event.target.value as typeof tool)}><option value="pixel">도트 정리</option><option value="tile">크기 맞춤</option><option value="palette">색상 맞춤</option><option value="cutout">배경 제거</option></select></div>
+      <div className="review-advanced" hidden={tab !== 'resource' && (tab !== 'tools' || tool !== 'pixel')}>
+        <Inspector workspace={workspace} asset={asset} selectedIds={selectedIds} busy={busy || running} run={run} onDirty={setInspectorDirty} mode={tab === 'resource' ? 'resource' : 'process'} />
       </div>
-      <div className="review-advanced" id="review-panel-palette" role="tabpanel" aria-labelledby="review-tab-palette" hidden={tab !== 'palette'}><PaletteTools workspace={workspace} asset={asset} selectedIds={selectedIds} busy={busy || running} run={run} reportError={reportError} onDirty={setPaletteDirty} /></div>
+      <div hidden={tab !== 'tools' || tool !== 'tile'}><TileTools workspace={workspace} asset={asset} selectedIds={selectedIds} busy={busy || running} run={run} reportError={reportError} onDirty={setTileDirty} /></div>
+      <div hidden={tab !== 'tools' || tool !== 'palette'}><PaletteTools workspace={workspace} asset={asset} selectedIds={selectedIds} busy={busy || running} run={run} reportError={reportError} onDirty={setPaletteDirty} /></div>
+      <div hidden={tab !== 'tools' || tool !== 'cutout'}><CutoutControl ids={targetIds} busy={busy || running} run={run} reportError={reportError} /></div>
     </div>
   </aside>;
 }
