@@ -104,7 +104,7 @@ fn fitted_dimensions(source: (u32, u32), settings: &TileSettings) -> Result<(u32
         ))
     }
 }
-fn render(
+pub(super) fn render(
     image: &RgbaImage,
     grid: u32,
     pivot: (f64, f64),

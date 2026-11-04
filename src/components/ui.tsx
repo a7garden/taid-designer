@@ -9,9 +9,6 @@ export type WorkspaceAction = (label: string, action: () => Promise<Workspace>) 
 export function Field({ label, hint, children, className = '' }: { label: string; hint?: string; children: ReactNode; className?: string }) {
   return <label className={`field ${className}`}><span className="field-label">{label}</span>{children}{hint && <span className="field-hint">{hint}</span>}</label>;
 }
-export function CheckField({ label, description, checked, onChange, disabled = false }: { label: string; description?: string; checked: boolean; onChange: (checked: boolean) => void; disabled?: boolean }) {
-  return <label className="check-field"><input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} disabled={disabled} /><span><span className="check-label">{label}</span>{description && <small>{description}</small>}</span></label>;
-}
 export function AssetStatus({ asset }: { asset: Asset }) {
   if (asset.reference) return <span className="status reference"><Circle size={12} />참고용</span>;
   if (asset.designApproved && asset.qcApproved) return <span className="status approved"><ShieldCheck size={13} />승인 완료</span>;
@@ -43,12 +40,13 @@ export function useModalKeyboard(open: boolean, onClose: () => void) {
   close.current = onClose;
   useEffect(() => {
     if (!open) return;
-    const dialog = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).find(el => !el.closest('[hidden]'));
+    const dialog = Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).filter(el => !el.closest('[hidden]') && el.getClientRects().length > 0).at(-1);
     if (!dialog) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex="0"]')).filter(element => element.getClientRects().length > 0);
     if (!dialog.contains(document.activeElement)) focusable()[0]?.focus();
     const keydown = (event: KeyboardEvent) => {
+      if (Array.from(document.querySelectorAll<HTMLElement>('[role="dialog"]')).filter(el => !el.closest('[hidden]') && el.getClientRects().length > 0).at(-1) !== dialog) return;
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close.current(); }
       if (event.key !== 'Tab') return;
       const items = focusable();

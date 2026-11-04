@@ -27,11 +27,11 @@ taid settings get
 
 To create a project, use `taid project create --parent "$PARENT" --name "$NAME"`; use the returned `data.root` for later commands. To change Codex defaults, use `taid settings set --model "$MODEL_ID" --effort medium`. Either settings flag may be supplied alone; the other field is retained. Model settings are not a generation or review request.
 
-The GUI's import runs local checks only. Its explicit “추가 후 AI 검토” toggle defaults off; manual review or that opt-in sends selected images and criteria to Codex. The installed, logged-in Codex CLI is required; Taid uses that account's Codex allowance, not a bypass of ChatGPT chat quota. GUI model settings discover models/efforts through the CLI and apply saved choices to the next review. Model settings are not permission to send company data. The analysis connection is advisory and tool-disabled; it cannot generate images, artistically fix files, pack Unity atlases or edit `.meta` files.
+The GUI offers direct import modes: inspect only, prepare to the saved profile (default), cutout then prepare, or prepare then AI review. PNG, drag-and-drop and Ctrl/Cmd+V share that pipeline. Local preparation never sends images to Codex; only the explicit AI mode or manual review does. The installed, logged-in Codex CLI is required for review; Taid uses that account's Codex allowance, not a bypass of ChatGPT chat quota. GUI model settings discover models/efforts through the CLI and apply saved choices to the next review. Model settings are not permission to send company data. The analysis connection is advisory and tool-disabled; it cannot generate images, artistically fix files, pack Unity atlases or edit `.meta` files.
 
 ## Plan
 
-Choose explicit asset IDs, a profile and the smallest requested operations. `generic` preserves the imported canvas and does not impose Stage 03 rules. Apply Stage 03 profiles only to Stage 03 work. Preserve intentional semitransparency unless the user explicitly requests the lossy `--alpha` operation.
+Choose explicit asset IDs, a profile and the smallest requested operations. `generic` preserves the imported canvas and does not impose Stage 03 rules. Apply Stage 03 profiles only to Stage 03 work. Preserve intentional semitransparency: manual `process --alpha` hardens it, and `prepare` also hardens it when the selected saved profile specifies binary alpha. Inspect that policy before a requested profile preparation.
 
 A trailing `_NN` or `-NN` filename suffix with at least two digits supplies the sequence and numeric frame index. Other stems remain separate sequences at frame 0. Inspect the inferred values; duplicate frames are QC errors, not permission to invent timing, movement or alignment. Union trim requires the whole sequence and preserves relative offsets. Scale is an integer from 1 to 8.
 
@@ -52,12 +52,18 @@ taid --project "$PROJECT" process --ids "$ASSET_IDS" --snap --trim --scale 2
 Current-image operations create new unapproved variants and preserve the parent:
 
 ```sh
+taid --project "$PROJECT" prepare --ids "$ASSET_IDS" --plan
+taid --project "$PROJECT" prepare --ids "$ASSET_IDS"
 taid --project "$PROJECT" cutout --ids "$ASSET_IDS"
 taid --project "$PROJECT" palette inspect --asset "$ASSET_ID"
 taid --project "$PROJECT" palette import --file "$PALETTE_FILE" --profile "$PROFILE_ID"
 taid --project "$PROJECT" palette map --ids "$ASSET_IDS"
 taid --project "$PROJECT" tile --ids "$ASSET_IDS" --width 32 --height 32 --scale 4 --mode pad --anchor bottom-center
 ```
+
+`prepare --plan` reads actual current pixels and returns per-asset steps, warnings, output dimensions, changed count and blocking reasons without writing files. `prepare` executes needed grid padding/snap, profile-required alpha hardening, approved-palette mapping and full-canvas centered nearest fit. It never trims, cuts out, calls AI, changes approval or artistically removes orphan dots. Changed inputs create new unapproved variants; conforming files do not create duplicates. A batch with invalid rules, references, changed files or invalid output is rejected atomically. These operations can lose colors, semitransparency and small details; inspect the plan and before/after images.
+
+New variants record `parentId` and `parentHash`. For an honest immediate-input comparison, use the parent's current image only if its hash matches, otherwise its preserved original only if that hash matches. An old asset without those fields or an unavailable matching parent is not evidence of the exact previous processing input.
 
 Cutout explicitly downloads the pinned 4.4 MiB (4,574,861-byte) Apache-2.0 U2Netp weights on first use, then runs local CPU inference; images are not uploaded. It retains source RGB, canvas and existing transparency. A 320×320 salient-object model can miss fine lines, hair, effects and pixel edges. Inspect the mask; do not describe segmentation as pixel-art correction or approval. Model/license references: https://github.com/xuebinqin/U-2-Net and https://github.com/xuebinqin/U-2-Net/blob/master/LICENSE .
 

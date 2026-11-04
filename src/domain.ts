@@ -13,6 +13,7 @@ export interface Asset {
   pivotX: number; pivotY: number; layer: number; notes: string; reference: boolean;
   cropX: number; cropY: number; processed: boolean;
   designApproved: boolean; qcApproved: boolean; issues: Issue[]; metrics: Metrics;
+  parentId?: string | null; parentHash?: string | null;
 }
 export interface Workspace {
   schemaVersion: number; name: string; root: string; notes: string;
@@ -36,3 +37,5 @@ export interface PaletteColor { hex: string; pixels: number; frequency: number; 
 export interface PaletteOutside extends PaletteColor { nearestApproved: string | null; distanceSquared: number | null; }
 export interface PaletteReport { assetId: string; inputHash: string; visiblePixels: number; colorCount: number; approvedPaletteSize: number; outsideColors: number; outsidePixels: number; dominantColors: PaletteColor[]; outsideSamples: PaletteOutside[]; allColors: PaletteColor[] | null; }
 export interface TileSettings { width: number; height: number; scale: number; mode: 'pad' | 'fit'; anchor: 'center' | 'bottom-center'; }
+export interface AutomationItem { assetId: string; name: string; steps: string[]; warnings: string[]; outputWidth: number; outputHeight: number; }
+export interface AutomationPlan { items: AutomationItem[]; changedCount: number; blocked: string[]; }

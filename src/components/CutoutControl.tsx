@@ -4,6 +4,7 @@ import type { CutoutProgress, CutoutStatus } from '../domain';
 import * as api from '../bridge';
 import type { WorkspaceAction } from './ui';
 import { errorMessage } from './ui';
+import { DetailPanel } from './Interaction';
 
 export function CutoutControl({ ids, busy, run, reportError }: { ids: string[]; busy: boolean; run: WorkspaceAction; reportError: (message: string) => void }) {
   const [status, setStatus] = useState<CutoutStatus | null>(null);
@@ -56,6 +57,6 @@ export function CutoutControl({ ids, busy, run, reportError }: { ids: string[]; 
     {done && <p className="tool-success" role="status">새 이미지를 만들었습니다. 원본은 유지됩니다.</p>}
     <p className="action-consequence">가는 선과 도트 경계는 결과를 확인하세요. 새 이미지는 미승인 상태입니다.</p>
     {statusError && <p className="inline-error" role="alert">{statusError}</p>}
-    <details className="cutout-details"><summary>모델·처리 방식</summary><p className="helper">{status?.notice || '로컬 신경망으로 주요 피사체를 분리합니다. 가는 선·머리카락·픽셀 경계는 결과를 직접 확인하세요.'}</p><p className="helper">원본 RGB와 기존 투명도를 보존합니다. 도트 격자나 알파 규칙이 어긋나면 새 이미지에서 도트 정리를 실행하세요.</p></details>
+    <DetailPanel title="모델·처리 방식"><p className="helper">{status?.notice || '로컬 신경망으로 주요 피사체를 분리합니다. 가는 선·머리카락·픽셀 경계는 결과를 직접 확인하세요.'}</p><p className="helper">원본 RGB와 기존 투명도를 보존합니다. 도트 격자나 알파 규칙이 어긋나면 새 이미지에서 도트 정리를 실행하세요.</p></DetailPanel>
   </section>;
 }

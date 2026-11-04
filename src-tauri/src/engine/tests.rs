@@ -877,3 +877,5 @@ fn cutout_rejects_stale_parent_hash_and_external_manifest_revision() {
 
 #[path = "palette_tile_tests.rs"]
 mod palette_tile_tests;
+
+mod automation;

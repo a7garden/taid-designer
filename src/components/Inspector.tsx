@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { Check, RotateCcw, Save, SlidersHorizontal } from 'lucide-react';
 import type { Asset, AssetPatch, ProcessSettings, Workspace } from '../domain';
 import * as api from '../bridge';
-import { CheckField, Empty, Field } from './ui';
+import { Empty, Field } from './ui';
+import { Choice, DetailPanel, ToggleAction } from './Interaction';
 import type { WorkspaceAction } from './ui';
 import '../workbench-tools.css';
 
@@ -127,26 +128,24 @@ export function Inspector({ workspace, asset, selectedIds, busy, run, onDirty, m
         <div className="section-heading"><h2>리소스 정보</h2>{dirty && <span className="dirty-label">저장 전</span>}</div>
         <Field label="파일명" hint="영문·숫자·밑줄·하이픈 / .png 자동 추가"><input value={value.name} onChange={event => edit('name', event.target.value)} disabled={busy} spellCheck={false} /></Field>
         <Field label="원본 파일"><span className="read-value" title={asset.originalPath}>{asset.sourceName}</span></Field>
-        <Field label="제작 기준"><select value={value.profileId} onChange={event => edit('profileId', event.target.value)} disabled={busy}>{workspace.profiles.map(profile => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></Field>
-        <details className="tool-disclosure metadata-disclosure">
-          <summary>시퀀스 · 프레임 · 레이어</summary>
+        <Choice label="제작 기준" value={value.profileId} onChange={next => edit('profileId', next)} disabled={busy} options={workspace.profiles.map(profile => ({ value: profile.id, label: profile.name }))} />
+        <DetailPanel title="시퀀스 · 프레임 · 레이어" className="metadata-panel">
         <Field label="시퀀스" hint="같은 이름의 에셋을 프레임 순서대로 재생합니다."><input value={value.sequence} onChange={event => edit('sequence', event.target.value)} disabled={busy} /></Field>
         <div className="field-row">
           <Field label="프레임 번호"><input type="number" min="0" max="1000000" step="1" value={value.frameIndex} onChange={event => edit('frameIndex', event.target.value)} disabled={busy} /></Field>
           <Field label="레이어"><input type="number" step="1" value={value.layer} onChange={event => edit('layer', event.target.value)} disabled={busy} /></Field>
         </div>
         <Field label="프레임 시간 (ms)"><input type="number" min="1" max="600000" step="1" value={value.durationMs} onChange={event => edit('durationMs', event.target.value)} disabled={busy} /><input type="range" aria-label="프레임 시간 조절" min="16" max="1000" step="1" value={Math.min(1000, Math.max(16, Number(value.durationMs) || 16))} onChange={event => edit('durationMs', event.target.value)} disabled={busy} /></Field>
-        </details>
-        <details className="tool-disclosure metadata-disclosure">
-          <summary>피벗 좌표</summary>
+        </DetailPanel>
+        <DetailPanel title="피벗 좌표" className="metadata-panel">
         <div className="field-row">
           <Field label="피벗 X (px)"><input type="number" step="any" value={value.pivotX} onChange={event => edit('pivotX', event.target.value)} disabled={busy} /></Field>
           <Field label="피벗 Y (px)"><input type="number" step="any" value={value.pivotY} onChange={event => edit('pivotY', event.target.value)} disabled={busy} /></Field>
         </div>
         <p className="helper compact">이미지 왼쪽 위가 (0, 0)입니다. 미리보기의 피벗 가이드로 위치를 확인하세요.</p>
-        </details>
+        </DetailPanel>
         <Field label="에셋 메모"><textarea rows={4} value={value.notes} onChange={event => edit('notes', event.target.value)} disabled={busy} /></Field>
-        <CheckField label="참고용 에셋" description="바탕 비교에 사용하며 승인·전달 대상에서 제외합니다." checked={value.reference} onChange={next => edit('reference', next)} disabled={busy} />
+        <ToggleAction label="참고용 에셋" description="바탕 비교에 사용하며 승인·전달 대상에서 제외합니다." active={value.reference} onChange={next => edit('reference', next)} disabled={busy} />
         {validation && <p className="inline-error" role="alert">{validation}</p>}
         {savedAsset === asset.id && !dirty && <p className="tool-success" role="status"><Check size={14} />리소스 정보를 저장했습니다.</p>}
         <div className="form-actions">
@@ -156,14 +155,13 @@ export function Inspector({ workspace, asset, selectedIds, busy, run, onDirty, m
       </> : <>
         <div className="section-heading"><h2>픽셀 정리</h2></div>
         <div className="tool-operation-list">
-          <CheckField label="논리 픽셀 정렬" checked={settings.snapToGrid} onChange={next => updateProcessing({ snapToGrid: next })} disabled={busy} />
-          <CheckField label="알파 이진화" checked={settings.hardenAlpha} onChange={next => updateProcessing({ hardenAlpha: next })} disabled={busy} />
-          <CheckField label="팔레트 매핑" checked={settings.mapPalette} onChange={next => updateProcessing({ mapPalette: next })} disabled={busy} />
-          <CheckField label="투명 여백 자르기" checked={settings.trim} onChange={next => updateProcessing({ trim: next })} disabled={busy} />
+          <ToggleAction label="논리 픽셀 정렬" description="제작 기준의 도트 격자에 맞춤" active={settings.snapToGrid} onChange={next => updateProcessing({ snapToGrid: next })} disabled={busy} />
+          <ToggleAction label="알파 이진화" description="제작 기준의 임계값으로 투명·불투명 구분" active={settings.hardenAlpha} onChange={next => updateProcessing({ hardenAlpha: next })} disabled={busy} />
+          <ToggleAction label="팔레트 매핑" description="각 에셋의 승인 팔레트로 색상 변경" active={settings.mapPalette} onChange={next => updateProcessing({ mapPalette: next })} disabled={busy} />
+          <ToggleAction label="투명 여백 자르기" description="시퀀스 공통 경계로 자르고 피벗 보정" active={settings.trim} onChange={next => updateProcessing({ trim: next })} disabled={busy} />
         </div>
-        <Field label="출력 배율"><select value={settings.scale} onChange={event => updateProcessing({ scale: Number(event.target.value) })} disabled={busy}>{[1, 2, 3, 4, 6, 8].map(scale => <option key={scale} value={scale}>{scale}×{scale === 1 ? ' · 크기 유지' : ' · 최근접 이웃 확대'}</option>)}</select></Field>
-        <details className="tool-disclosure">
-          <summary>처리 방식과 주의사항</summary>
+        <Choice label="출력 배율" value={settings.scale} onChange={scale => updateProcessing({ scale })} disabled={busy} options={[1, 2, 3, 4, 6, 8].map(scale => ({ value: scale, label: `${scale}×`, detail: scale === 1 ? '크기 유지' : '최근접 이웃 확대' }))} compact />
+        <DetailPanel title="처리 방식과 주의사항">
           <p>선택한 처리만 보관 원본에서 다시 적용합니다. 현재 결과에 누적하지 않으며 원본 파일은 바꾸지 않습니다.</p>
           <dl className="tool-explanations">
             <dt>논리 픽셀 정렬</dt><dd>제작 기준의 픽셀 크기로 색을 정렬합니다.</dd>
@@ -171,21 +169,20 @@ export function Inspector({ workspace, asset, selectedIds, busy, run, onDirty, m
             <dt>팔레트 매핑</dt><dd>각 에셋의 제작 기준에 지정된 가까운 색으로 바꿉니다.</dd>
             <dt>여백 자르기</dt><dd>같은 시퀀스의 모든 프레임이 필요합니다. 공통 경계로 잘라 프레임 사이 위치 차이를 유지하고 피벗을 보정합니다.</dd>
           </dl>
-        </details>
+        </DetailPanel>
         {settings.trim && missingSequence && <p className="inline-error" role="alert">‘{missingSequence}’ 시퀀스의 모든 프레임을 선택해야 여백을 자를 수 있습니다.</p>}
         <div className="tool-action-footer">
           <div className="tool-action-summary"><strong>{selectedIds.length ? '선택한' : '현재'} 에셋 {processIds.length}개</strong><span>{operations.length ? operations.join(' · ') : '적용할 처리를 선택하세요.'}</span></div>
-          <details className="tool-targets"><summary>적용 대상 보기</summary><ul>{workspace.assets.filter(item => processIds.includes(item.id)).map(item => <li key={item.id}>{item.name}.png</li>)}</ul></details>
+          <DetailPanel title="적용 대상 보기" className="tool-targets"><ul>{workspace.assets.filter(item => processIds.includes(item.id)).map(item => <li key={item.id}>{item.name}.png</li>)}</ul></DetailPanel>
           {hasOperation && <p className="tool-caution">보관 원본에서 다시 처리하며 디자인·QC 승인이 해제됩니다.{settings.snapToGrid && ' 디테일이 줄어들 수 있습니다.'}{settings.hardenAlpha && ' 부드러운 투명 효과가 사라질 수 있습니다.'}{settings.mapPalette && ' 원래 색을 잃을 수 있습니다.'}</p>}
           <button className="button primary full" disabled={busy || !processIds.length || !hasOperation || (settings.trim && !!missingSequence)} onClick={() => void process()}><SlidersHorizontal size={15} />{isApplied ? '같은 처리 다시 적용' : `${processIds.length}개에 적용`}</button>
           {isApplied && <p className="tool-success" role="status"><Check size={14} />{processIds.length}개에 적용했습니다. ‘나란히’ 보기에서 비교하세요.</p>}
           {processDrafts[asset.id] && processingChanged(processDrafts[asset.id]) && <button className="button tool-text-button" disabled={busy} onClick={() => setProcessDrafts(previous => ({ ...previous, [asset.id]: { ...previous[asset.id], value: previous[asset.id].saved } }))}>옵션 편집 취소</button>}
         </div>
-        <details className="tool-disclosure tool-reset">
-          <summary>현재 에셋 원본 복원</summary>
+        <DetailPanel title="현재 에셋 원본 복원" className="tool-reset">
           <p>{asset.name}.png의 처리 결과와 디자인·QC 승인을 초기화합니다. 보관 원본은 유지됩니다.</p>
           {resetConfirm ? <div className="confirm-inline"><p>현재 에셋을 원본으로 되돌릴까요?</p><div className="form-actions"><button className="button danger" disabled={busy} onClick={() => void run('원본 복원', () => api.resetAsset(asset.id)).then(ok => { if (ok) { setResetConfirm(false); setApplied(previous => { const next = { ...previous }; delete next[asset.id]; return next; }); } })}>원본 복원</button><button className="button" disabled={busy} onClick={() => setResetConfirm(false)}>취소</button></div></div> : <button className="button" disabled={busy || !asset.processed} onClick={() => setResetConfirm(true)}><RotateCcw size={14} />원본으로 되돌리기</button>}
-        </details>
+        </DetailPanel>
       </>}
     </div>}
   </section>;

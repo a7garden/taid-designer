@@ -1,7 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { AppSettings, AssetPatch, CodexEvent, CodexModel, CodexResult, CodexStatus, CutoutProgress, CutoutStatus, ExportResult, PaletteReport, ProcessSettings, RecentProject, RuleProfile, TileSettings, Workspace } from './domain';
+import type { AppSettings, AssetPatch, AutomationPlan, CodexEvent, CodexModel, CodexResult, CodexStatus, CutoutProgress, CutoutStatus, ExportResult, PaletteReport, ProcessSettings, RecentProject, RuleProfile, TileSettings, Workspace } from './domain';
 
 export const copyText = (text: string) => invoke<void>('copy_text', { text });
 export const captureClipboardImage = () => invoke<string>('capture_clipboard_image');
@@ -35,6 +35,8 @@ export const inspectPalette = (assetId: string) => invoke<PaletteReport>('asset_
 export const mapPaletteAssets = (assetIds: string[]) => invoke<Workspace>('assets_palette_map', { assetIds });
 export const readPalette = (path: string) => invoke<string[]>('palette_read', { path });
 export const tileAssets = (assetIds: string[], settings: TileSettings) => invoke<Workspace>('assets_tile', { assetIds, settings });
+export const automationPlan = (assetIds: string[]) => invoke<AutomationPlan>('automation_plan', { assetIds });
+export const autoPrepareAssets = (assetIds: string[]) => invoke<Workspace>('assets_auto_prepare', { assetIds });
 export async function choosePalette(): Promise<string | null> {
   return await open({ multiple: false, directory: false, title: '팔레트 가져오기', filters: [{ name: '팔레트', extensions: ['hex', 'gpl'] }] }) as string | null;
 }

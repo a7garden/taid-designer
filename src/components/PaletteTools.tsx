@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Check, FileUp, Pencil } from 'lucide-react';
+import { Check, FileUp } from 'lucide-react';
 import type { Asset, PaletteReport, Workspace } from '../domain';
 import * as api from '../bridge';
 import { errorMessage, Field, formatNumber } from './ui';
+import { Choice, DetailPanel } from './Interaction';
 import type { WorkspaceAction } from './ui';
 import '../workbench-tools.css';
 
@@ -108,33 +109,29 @@ export function PaletteTools({ workspace, asset, selectedIds, busy, run, reportE
         <p className={report.approvedPaletteSize && report.outsidePixels ? 'inline-error' : 'tool-inline-note'}>
           {!report.approvedPaletteSize ? '승인 팔레트 미지정 · 적합 여부 미판정' : report.outsidePixels ? `승인 팔레트 밖 ${formatNumber(report.outsideColors)}색 · ${formatNumber(report.outsidePixels)}픽셀` : `승인 팔레트 ${report.approvedPaletteSize}색 안에 있습니다.`}
         </p>
-        <details className="tool-disclosure">
-          <summary>RGB별 사용량 · 최대 32색</summary>
+        <DetailPanel title="RGB별 사용량 · 최대 32색">
           <p>완전 투명 픽셀은 제외하고 반투명 픽셀은 RGB별로 셉니다. 현재 파일만 읽습니다.</p>
           <div className="palette-histogram">{report.dominantColors.map(color => <div className="palette-color-row" key={color.hex}>
             <span className="palette-color-chip" style={{ backgroundColor: color.hex }} aria-hidden="true" /><code>{color.hex}</code><span>{formatNumber(color.pixels)}px</span><span>{(color.frequency * 100).toFixed(1)}%</span>
           </div>)}</div>
-        </details>
-        {report.outsideSamples.length > 0 && <details className="tool-disclosure"><summary>팔레트 밖 색상과 가까운 승인 RGB</summary>
+        </DetailPanel>
+        {report.outsideSamples.length > 0 && <DetailPanel title="팔레트 밖 색상과 가까운 승인 RGB">
           <p>최대 24색의 RGB 제곱 거리 제안입니다. 형태나 명암의 적합성을 대신 판단하지 않습니다.</p>
           {report.outsideSamples.map(color => <div className="palette-color-row" key={color.hex}>
             <span className="palette-color-chip" style={{ backgroundColor: color.hex }} aria-hidden="true" /><code>{color.hex}</code><span>{formatNumber(color.pixels)}px → {color.nearestApproved}</span><span>거리² {color.distanceSquared}</span>
           </div>)}
-        </details>}
+        </DetailPanel>}
       </>}
     </>}
 
     <section className="palette-profile-section">
       <div className="section-heading"><h3>승인 팔레트</h3>{draftDirty && <span className="dirty-label">저장 전</span>}</div>
-      <Field label="저장할 제작 기준"><select value={profileId} disabled={busy || fileLoading} onChange={event => { setProfileId(event.target.value); setValidation(''); setSavedProfile(''); }}>
-        <option value="">제작 기준 선택</option>{workspace.profiles.map(item => <option key={item.id} value={item.id}>{item.name}{item.id === asset?.profileId ? ' · 현재 이미지' : ''}{drafts[item.id] && hasPaletteEdits(drafts[item.id], item.palette) ? ' · 저장 전' : ''}</option>)}
-      </select></Field>
+      <Choice label="저장할 제작 기준" value={profileId} disabled={busy || fileLoading} onChange={next => { setProfileId(next); setValidation(''); setSavedProfile(''); }} options={[{ value: '', label: '선택 안 함' }, ...workspace.profiles.map(item => ({ value: item.id, label: item.name, detail: [item.id === asset?.profileId ? '현재 이미지' : '', drafts[item.id] && hasPaletteEdits(drafts[item.id], item.palette) ? '저장 전' : ''].filter(Boolean).join(' · ') || undefined }))]} />
       {targetProfile && <>
-        <div className="palette-profile-summary"><span>{targetProfile.palette.length ? `저장된 색상 ${targetProfile.palette.length}개` : '색상 제한 없음'}</span><button className="button tool-text-button" disabled={busy} aria-expanded={editorOpen} onClick={() => setEditorOpen(value => !value)}><Pencil size={13} />{editorOpen ? '편집 접기' : '편집'}</button></div>
+        <p className="palette-profile-summary">{targetProfile.palette.length ? `저장된 색상 ${targetProfile.palette.length}개` : '색상 제한 없음'}</p>
         {targetProfile.palette.length > 0 && <div className="palette-swatches approved-palette-swatches" aria-label={`저장된 승인 팔레트 ${targetProfile.palette.length}색`}>{targetProfile.palette.map(color => <span key={color} role="img" aria-label={color} title={color} style={{ backgroundColor: color }} />)}</div>}
       </>}
-      <details className="tool-disclosure palette-editor" open={editorOpen} onToggle={event => setEditorOpen(event.currentTarget.open)}>
-        <summary>팔레트 가져오기 · 붙여넣기{draftDirty ? ' · 저장 전' : ''}</summary>
+      <DetailPanel title={`팔레트 편집${draftDirty ? ' · 저장 전' : ''}`} className="palette-editor workbench-tool" open={editorOpen} onOpenChange={setEditorOpen}>
         <div className="palette-tool-actions form-actions">
           <button className="button" disabled={busy || fileLoading || !targetProfile} onClick={() => void importFile()}><FileUp size={14} />파일 가져오기</button>
           <button className="button" disabled={busy || !targetProfile || !report?.allColors?.length} onClick={() => { if (report?.allColors) editDraft(report.allColors.map(color => color.hex).join('\n')); }}>현재 이미지 색 사용</button>
@@ -148,15 +145,15 @@ export function PaletteTools({ workspace, asset, selectedIds, busy, run, reportE
         {targetProfile && <p className="tool-caution">「{targetProfile.name}」의 연결 에셋 {targetCount}개를 재검사하고 승인을 해제합니다. 이미지 픽셀은 바꾸지 않습니다.{draftValid && !draftColors.length && ' 빈 팔레트를 저장하면 색상 제한이 해제됩니다.'}</p>}
         <div className="form-actions"><button className="button" disabled={busy || fileLoading || !targetProfile || !draftDirty} onClick={() => void savePalette()}>팔레트 저장</button>
           <button className="button tool-text-button" disabled={busy || fileLoading || !draftDirty} onClick={() => { setDrafts(previous => { const next = { ...previous }; delete next[profileId]; return next; }); setValidation(''); setEditorOpen(false); }}>편집 취소</button></div>
-      </details>
+      </DetailPanel>
       {savedProfile && savedProfile === profileId && !draftDirty && <p className="tool-success" role="status"><Check size={14} />팔레트를 저장하고 연결 에셋을 재검사했습니다.</p>}
     </section>
 
-    <section className="palette-map-settings" hidden={editorOpen}>
+    <section className="palette-map-settings">
       <h3>팔레트로 색상 맞춤</h3>
-      <Field label="변환 대상"><select value={scope} disabled={busy} onChange={event => setScope(event.target.value as typeof scope)}><option value="current">현재 이미지 {asset ? '1개' : '없음'}</option><option value="selected">선택한 이미지 {selectedIds.length}개</option></select></Field>
+      <Choice label="변환 대상" value={scope} onChange={setScope} disabled={busy} options={[{ value: 'current', label: `현재 이미지 ${asset ? '1개' : '없음'}` }, { value: 'selected', label: `선택한 이미지 ${selectedIds.length}개` }]} />
     </section>
-    <div className="tool-action-footer" hidden={editorOpen}>
+    <div className="tool-action-footer">
       <div className="tool-action-summary"><strong>{scope === 'selected' ? '선택한' : '현재'} 이미지 {ids.length}개 → 새 미승인 변형 {ids.length}개</strong><span>각 에셋에 저장된 팔레트 사용 · 원본과 이전 처리 결과 유지</span></div>
       <p className="tool-caution">RGB 색을 바꾸고 투명도(알파)는 유지합니다. 위의 미저장 초안은 사용하지 않습니다.</p>
       {missingPalette && <p className="inline-error">「{missingPalette.name}」의 제작 기준에 승인 팔레트를 먼저 저장하세요.</p>}

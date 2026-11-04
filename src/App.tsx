@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertCircle, ArrowLeft, ArrowRight, Check, ChevronDown, Copy, FolderOpen, FolderOutput, ImagePlus, Layers, LoaderCircle, Minus, Plus, RefreshCw, Search, Settings2, Square, X } from 'lucide-react';
+import type { MouseEvent } from 'react';
+import { AlertCircle, ArrowLeft, ArrowRight, Check, Copy, FolderOpen, FolderOutput, ImagePlus, Layers, LoaderCircle, Minus, Plus, RefreshCw, Search, Settings2, Square, X } from 'lucide-react';
 import { getCurrentWebview } from '@tauri-apps/api/webview';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { AppSettings, CodexModel, RecentProject, Workspace } from './domain';
@@ -11,11 +12,13 @@ import { ModelSettings, modelValidation } from './components/ModelSettings';
 import { Preview } from './components/Preview';
 import { Profiles } from './components/Profiles';
 import { errorMessage, Field, useModalKeyboard, isApproved } from './components/ui';
+import { Choice, DetailPanel } from './components/Interaction';
 import { useImagePaste } from './useImagePaste';
 import './styles.css';
 
 type Screen = 'studio' | 'rules' | 'handoff';
 type Filter = 'all' | 'review' | 'issues' | 'approved' | 'reference';
+type IntakeMode = 'inspect' | 'prepare' | 'cutout' | 'review';
 type ProjectAction = { kind: 'open' | 'create' | 'reload' | 'close' } | { kind: 'recent'; project: RecentProject };
 const isMac = /Mac|iPhone|iPad/.test(navigator.platform);
 const isWindows = /Win/.test(navigator.platform);
@@ -31,6 +34,7 @@ export default function App() {
   const [screen, setScreen] = useState<Screen>('studio');
   const [activeId, setActiveId] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const selectionAnchor = useRef<string | null>(null);
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<Filter>('all');
   const [importProfileId, setImportProfileId] = useState('');
@@ -39,7 +43,8 @@ export default function App() {
   const [projectName, setProjectName] = useState('');
   const [createError, setCreateError] = useState('');
   const [queuedPaths, setQueuedPaths] = useState<string[]>([]);
-  const [autoReview, setAutoReview] = useState(false);
+  const [intakeMode, setIntakeMode] = useState<IntakeMode>('prepare');
+  const autoReview = intakeMode === 'review';
   const [reviewQueue, setReviewQueue] = useState<ReviewRequest[]>([]);
   const reviewRequestId = useRef(0);
   const [pendingSwitch, setPendingSwitch] = useState<ProjectAction | null>(null);
@@ -47,7 +52,6 @@ export default function App() {
   const [reviewDirty, setReviewDirty] = useState(false);
   const [aiRunning, setAiRunning] = useState(false);
   const [projectMenu, setProjectMenu] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
   const [recent, setRecent] = useState<RecentProject[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
   const [recentError, setRecentError] = useState('');
@@ -169,10 +173,6 @@ export default function App() {
   useEffect(() => {
     if (!projectMenu) return;
     void loadRecent();
-    const close = (event: PointerEvent) => { if (!menuRef.current?.contains(event.target as Node)) setProjectMenu(false); };
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setProjectMenu(false); menuRef.current?.querySelector('button')?.focus(); } };
-    document.addEventListener('pointerdown', close); document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape); };
   }, [projectMenu, loadRecent]);
   useEffect(() => {
     if (!workspace?.root) return;
@@ -189,15 +189,34 @@ export default function App() {
     window.addEventListener('focus', check);
     return () => { live = false; window.clearInterval(interval); window.removeEventListener('focus', check); };
   }, [workspace?.root]);
-  const importIntoWorkspace = useCallback(async (paths: string[], current: Workspace, profileId: string, review: boolean) => {
+  const importIntoWorkspace = useCallback(async (paths: string[], current: Workspace, profileId: string, mode: IntakeMode) => {
     const before = new Set(current.assets.map(asset => asset.id));
-    const next = await api.importAssets(paths, profileId || current.profiles[0]?.id || '');
+    let next = await api.importAssets(paths, profileId || current.profiles[0]?.id || '');
     const addedIds = next.assets.filter(asset => !before.has(asset.id)).map(asset => asset.id);
+    let resultIds = addedIds;
     acceptWorkspace(next);
     setScreen('studio');
-    setNotice(`${addedIds.length}개 추가 · 로컬 파일 검사 완료${review && addedIds.length ? addedIds.length > 8 ? ' · AI 검토는 한 번에 최대 8개' : ' · AI 검토 요청' : ' · AI 전송 안 함'}`);
-    if (review && addedIds.length) setReviewQueue(queue => [...queue, { id: ++reviewRequestId.current, assetIds: addedIds }]);
-  }, [acceptWorkspace]);
+    try {
+      const operations = mode === 'cutout' ? [api.removeBackground, api.autoPrepareAssets] : mode !== 'inspect' ? [api.autoPrepareAssets] : [];
+      for (const operation of operations) {
+        if (!resultIds.length) break;
+        const previousIds = new Set(next.assets.map(asset => asset.id));
+        next = await operation(resultIds);
+        const created = next.assets.filter(asset => !previousIds.has(asset.id));
+        resultIds = resultIds.map(id => created.find(asset => asset.parentId === id)?.id ?? id);
+        acceptWorkspace(next);
+      }
+    } catch (error) {
+      reportError(`이미지 추가는 완료했습니다. 후속 처리는 중단했으며 저장된 원본과 현재까지의 결과는 유지됩니다: ${errorMessage(error)}`);
+      setNotice(`${addedIds.length}개 추가 · 자동 처리 중단 · AI 전송 안 함`);
+      return;
+    }
+    setActiveId(resultIds[0] ?? '');
+    setSelectedIds(resultIds);
+    const review = mode === 'review';
+    setNotice(`${addedIds.length}개 추가${mode !== 'inspect' ? ' · 기준 정리 완료' : ' · 로컬 검사 완료'}${review && resultIds.length ? resultIds.length > 8 ? ' · AI 검토는 한 번에 최대 8개' : ' · AI 검토 요청' : ' · AI 전송 안 함'}`);
+    if (review && resultIds.length) setReviewQueue(queue => [...queue, { id: ++reviewRequestId.current, assetIds: resultIds }]);
+  }, [acceptWorkspace, reportError]);
   const prepareFirstImport = useCallback((paths: string[]) => {
     setQueuedPaths(paths);
     const filename = paths[0]?.split(/[\\/]/).pop() ?? '';
@@ -210,9 +229,9 @@ export default function App() {
     if (busyRef.current) { await api.releaseClipboardImages(paths); reportError('현재 작업이 끝난 뒤 이미지를 다시 놓아 주세요.'); return; }
     const current = workspaceRef.current;
     if (!current) { prepareFirstImport(paths); return; }
-    const imported = await runAction('PNG 추가 · 로컬 파일 검사', () => importIntoWorkspace(paths, current, importProfileId, autoReview));
+    const imported = await runAction('PNG 추가 · 선택한 흐름 실행', () => importIntoWorkspace(paths, current, importProfileId, intakeMode));
     if (!imported) await api.releaseClipboardImages(paths);
-  }, [importProfileId, autoReview, reportError, runAction, importIntoWorkspace, prepareFirstImport]);
+  }, [importProfileId, intakeMode, reportError, runAction, importIntoWorkspace, prepareFirstImport]);
   const pasteImage = useImagePaste({
     onPaths: importPaths, onError: reportError,
     disabled: !!busy || loading || createModal || settingsModal || !!pendingSwitch,
@@ -234,8 +253,8 @@ export default function App() {
     if (!paths.length) return;
     const current = workspaceRef.current;
     if (!current) { prepareFirstImport(paths); return; }
-    await importIntoWorkspace(paths, current, importProfileId, autoReview);
-  }), [runAction, importProfileId, autoReview, importIntoWorkspace, prepareFirstImport]);
+    await importIntoWorkspace(paths, current, importProfileId, intakeMode);
+  }), [runAction, importProfileId, intakeMode, importIntoWorkspace, prepareFirstImport]);
   const applyProject = useCallback((next: Workspace) => {
     acceptWorkspace(next); setWorkspaceSession(session => session + 1); setRulesDirty(false); setReviewDirty(false); setReviewQueue([]); setExternalChanged(false); setSyncError(''); void loadRecent();
   }, [acceptWorkspace, loadRecent]);
@@ -282,7 +301,7 @@ export default function App() {
       setCreateModal(false);
       const paths = queuedPaths;
       setQueuedPaths([]);
-      if (paths.length) await importIntoWorkspace(paths, next, next.profiles[0]?.id ?? '', autoReview);
+      if (paths.length) await importIntoWorkspace(paths, next, next.profiles[0]?.id ?? '', intakeMode);
     });
   }
   async function saveSettings() {
@@ -299,14 +318,25 @@ export default function App() {
     const matches = `${a.name} ${a.sourceName} ${a.sequence}`.toLocaleLowerCase().includes(search.toLocaleLowerCase());
     return matches && (filter === 'all' || (filter === 'reference' ? a.reference : filter === 'approved' ? isApproved(a) : filter === 'issues' ? a.issues.length > 0 : !a.reference && !isApproved(a)));
   }) ?? [];
-  const toggleSelected = (id: string, checked: boolean) => setSelectedIds(old => checked ? [...new Set([...old, id])] : old.filter(v => v !== id));
-  const selectAsset = (id: string) => { setActiveId(id); setScreen('studio'); };
+  const selectAsset = (id: string) => { setActiveId(id); setSelectedIds([id]); selectionAnchor.current = id; setScreen('studio'); };
+  function selectRow(id: string, event: MouseEvent<HTMLButtonElement>) {
+    setActiveId(id);
+    if (event.shiftKey && selectionAnchor.current) {
+      const from = visible.findIndex(asset => asset.id === selectionAnchor.current);
+      const to = visible.findIndex(asset => asset.id === id);
+      const range = from < 0 ? [id] : visible.slice(Math.min(from, to), Math.max(from, to) + 1).map(asset => asset.id);
+      setSelectedIds(previous => event.metaKey || event.ctrlKey ? [...new Set([...previous, ...range])] : range);
+    } else {
+      setSelectedIds(previous => event.metaKey || event.ctrlKey ? previous.includes(id) ? previous.filter(value => value !== id) : [...previous, id] : [id]);
+      selectionAnchor.current = id;
+    }
+  }
   const openModelSettings = () => { setProjectMenu(false); setSettingsModal(true); };
-  const intakeOptions = <label className="auto-review-option"><input type="checkbox" role="switch" checked={autoReview} disabled={!!busy || loading} onChange={event => setAutoReview(event.target.checked)} /><span><strong>추가 후 AI 검토</strong><small>{autoReview ? 'Codex 전송 · 계정 사용량 소비' : '꺼짐 · 로컬 검사만 실행'}</small></span></label>;
+  const intakeOptions = <div className="intake-flow"><Choice compact label="추가하면" value={intakeMode} onChange={setIntakeMode} disabled={!!busy || loading} options={[{value:'inspect',label:'검사만'},{value:'prepare',label:'기준 정리'},{value:'cutout',label:'누끼 + 정리'},{value:'review',label:'정리 + AI 검토'}]} /><p>{intakeMode === 'review' ? '이미지·기준을 Codex에 전송 · 계정 사용량 소비' : intakeMode === 'inspect' ? '로컬 검사만 · 이미지 전송 없음' : '로컬 처리 · 원본 보존 · 새 결과는 미승인'}</p></div>;
   const intakeContent = <div className="intake-content">
     <span className="intake-filetype">PNG</span>
     <h1>이미지를 놓고 검토하세요</h1>
-    <p>원본을 프로젝트에 보관하고 크기·투명도·픽셀 규격을 자동 검사합니다. AI 검토는 직접 실행하거나 ‘추가 후 AI 검토’를 켰을 때만 시작합니다.</p>
+    <p>선택한 흐름으로 검사와 정리를 이어갑니다. 원본은 보관하고 결과를 새 이미지로 남깁니다. AI 전송은 ‘정리 + AI 검토’를 고르거나 직접 요청할 때만 합니다.</p>
     <div className="form-actions"><button className="button primary" disabled={!!busy || loading} onClick={() => void chooseImport()}><ImagePlus size={16} />PNG 가져오기</button><button className="button" disabled={!!busy || loading} onClick={() => void pasteImage()}>클립보드 붙여넣기</button></div>
     <span className="intake-drop-hint">파일을 놓거나 {isMac ? '⌘V · Ctrl+V' : 'Ctrl+V'}로 이미지를 붙여넣으세요</span>
     {!workspace && intakeOptions}
@@ -314,14 +344,14 @@ export default function App() {
   </div>;
   return <div className={`app-shell ${isMac ? 'platform-mac' : isWindows ? 'platform-windows' : 'platform-other'}`}>
     <header className="app-header" data-tauri-drag-region>
-      <div className="project-switcher" ref={menuRef}>
-        <button className="project-trigger" aria-label="프로젝트 전환" aria-expanded={projectMenu} aria-controls="project-menu" title={workspace?.root ?? '프로젝트 열기 또는 만들기'} disabled={!!busy || loading} onClick={() => setProjectMenu(open => !open)}><Layers size={17} /><strong>{workspace?.name ?? 'Taid Designer'}</strong>{(dirty || settingsDirty) && <span className="dirty-dot" aria-label="저장 전 편집 있음" />}<ChevronDown size={13} /></button>
-        {projectMenu && <div className="project-menu" id="project-menu" role="group" aria-label="프로젝트 메뉴">
+      <div className="project-switcher">
+        <DetailPanel title="프로젝트" triggerLabel="프로젝트 전환" open={projectMenu} onOpenChange={setProjectMenu} disabled={!!busy || loading} trigger={<span className="project-trigger-content"><Layers size={17} /><strong>{workspace?.name ?? 'Taid'}</strong>{(dirty || settingsDirty) && <span className="dirty-dot" aria-label="저장 전 편집 있음" />}</span>}>
+        <div className="project-browser" role="group" aria-label="프로젝트 목록">
           {workspace && <div className="current-project"><strong>{workspace.name}</strong><span>{workspace.root}</span></div>}
           <div className="project-menu-actions"><button disabled={aiRunning} onClick={() => requestSwitch({ kind: 'open' })}><FolderOpen size={15} />프로젝트 열기 <kbd>{isMac ? '⌘' : 'Ctrl+'}O</kbd></button><button disabled={aiRunning} onClick={() => requestSwitch({ kind: 'create' })}><Plus size={15} />새 프로젝트</button>{workspace && <button disabled={aiRunning} onClick={() => requestSwitch({ kind: 'reload' })}><RefreshCw size={15} />다시 불러오기</button>}</div>
           <div className="recent-heading"><span>최근 프로젝트</span><button className="icon-button" title="최근 프로젝트 새로고침" aria-label="최근 프로젝트 새로고침" disabled={recentLoading} onClick={() => void loadRecent()}><RefreshCw size={13} className={recentLoading ? 'spin' : ''} /></button></div>
           {recentError ? <p className="inline-error">최근 목록을 불러오지 못했습니다: {recentError}</p> : recent.length ? <div className="recent-projects">{recent.map(project => <button key={project.root} disabled={aiRunning} className={project.root === workspace?.root ? 'current' : ''} title={project.root} onClick={() => requestSwitch({ kind: 'recent', project })}><span><strong>{project.name}</strong><small>{project.root}</small></span>{!project.available ? <span className="unavailable-project">찾을 수 없음</span> : project.root === workspace?.root ? <Check size={14} /> : null}</button>)}</div> : <p className="menu-empty">{recentLoading ? '목록 불러오는 중…' : '최근 프로젝트가 없습니다.'}</p>}
-        </div>}
+        </div></DetailPanel>
       </div>
       {workspace && screen !== 'studio' && <button className="back-to-studio" onClick={() => setScreen('studio')}><ArrowLeft size={14} />이미지로 돌아가기</button>}
       <span className="titlebar-spacer" data-tauri-drag-region />
@@ -348,19 +378,19 @@ export default function App() {
         <aside className="asset-sidebar">
           <div className="asset-sidebar-heading"><h2>이미지</h2><span>{workspace.assets.length}</span><button className="icon-button" aria-label="PNG 추가" title="PNG 추가" disabled={!!busy} onClick={() => void chooseImport()}><Plus size={16} /></button></div>
           <div className="asset-search"><Search size={14} /><input aria-label="에셋 검색" value={search} onChange={e => setSearch(e.target.value)} placeholder="파일·시퀀스 검색" /></div>
-          <div className="asset-filter"><select aria-label="에셋 상태 필터" value={filter} onChange={e => setFilter(e.target.value as Filter)}><option value="all">모든 이미지</option><option value="review">승인 대기</option><option value="issues">로컬 검사 문제</option><option value="approved">승인 완료</option><option value="reference">참고용</option></select></div>
-          <div className="selection-toolbar"><label><input type="checkbox" aria-label="보이는 에셋 모두 선택" ref={element => { if (element) element.indeterminate = visible.some(a => selectedIds.includes(a.id)) && !visible.every(a => selectedIds.includes(a.id)); }} checked={visible.length > 0 && visible.every(a => selectedIds.includes(a.id))} disabled={!visible.length || !!busy} onChange={e => { const shown = new Set(visible.map(a => a.id)); setSelectedIds(old => e.target.checked ? [...new Set([...old, ...shown])] : old.filter(id => !shown.has(id))); }} />{selectedIds.length ? `${selectedIds.length}개 선택` : '전체 선택'}</label>{selectedIds.length > 0 && <button className="text-button" disabled={!!busy} onClick={() => setSelectedIds([])}>해제</button>}</div>
-          <div className="asset-list">{visible.map(a => <div key={a.id} className={`asset-row ${activeId === a.id ? 'active' : ''}`}><input type="checkbox" aria-label={`${a.name} 선택`} checked={selectedIds.includes(a.id)} onChange={e => toggleSelected(a.id, e.target.checked)} disabled={!!busy} /><button className="asset-row-main" aria-current={activeId === a.id ? 'true' : undefined} onClick={() => setActiveId(a.id)}><span className="asset-thumbnail"><img src={api.imageUrl(a.filePath, a.currentHash)} alt="" /></span><span className="asset-row-info"><strong title={a.name}>{a.name}</strong><small className={a.reference ? 'reference' : isApproved(a) ? 'approved' : a.issues.length ? 'issue' : ''}>{a.reference ? '참고용' : isApproved(a) ? '승인 완료' : a.issues.length ? `로컬 문제 ${a.issues.length}` : '로컬 검사 완료'}</small></span></button></div>)}{!visible.length && <div className="asset-list-empty">{workspace.assets.length ? '검색 결과가 없습니다.' : '추가한 이미지가 여기에 표시됩니다.'}</div>}</div>
-          <div className="intake-settings"><div className="import-profile"><label htmlFor="import-profile">추가할 이미지의 제작 기준</label><select id="import-profile" value={importProfileId} disabled={!!busy} onChange={e => setImportProfileId(e.target.value)}>{workspace.profiles.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></div>{intakeOptions}</div>
+          <div className="asset-filter"><Choice compact label="보기" value={filter} onChange={setFilter} options={[{value:'all',label:'전체'},{value:'review',label:'대기'},{value:'issues',label:'문제'},{value:'approved',label:'승인본'},{value:'reference',label:'참고'}]} /></div>
+          <div className="selection-toolbar"><span>{selectedIds.length ? `${selectedIds.length}개 선택` : '이미지를 눌러 선택'}</span><button className="text-button" disabled={!visible.length || !!busy} onClick={() => setSelectedIds(visible.map(asset => asset.id))}>모두</button>{selectedIds.length > 0 && <button className="text-button" disabled={!!busy} onClick={() => setSelectedIds([])}>해제</button>}</div>
+          <div className="asset-list">{visible.map(asset => <div key={asset.id} className={`asset-row ${activeId === asset.id ? 'active' : ''} ${selectedIds.includes(asset.id) ? 'selected' : ''}`}><button className="asset-row-main" aria-current={activeId === asset.id ? 'true' : undefined} aria-pressed={selectedIds.includes(asset.id)} disabled={!!busy} onClick={event => selectRow(asset.id, event)}><span className="asset-thumbnail"><img src={api.imageUrl(asset.filePath, asset.currentHash)} alt="" /></span><span className="asset-row-info"><strong title={asset.name}>{asset.name}</strong><small className={asset.reference ? 'reference' : isApproved(asset) ? 'approved' : asset.issues.length ? 'issue' : ''}>{asset.reference ? '참고용' : isApproved(asset) ? '승인 완료' : asset.issues.length ? `로컬 문제 ${asset.issues.length}` : '로컬 검사 완료'}</small></span></button></div>)}{!visible.length && <div className="asset-list-empty">{workspace.assets.length ? '검색 결과가 없습니다.' : '추가한 이미지가 여기에 표시됩니다.'}</div>}</div>
+          <div className="intake-settings"><DetailPanel title={`추가 기준 · ${workspace.profiles.find(profile => profile.id === importProfileId)?.name ?? '선택'}`}><Choice label="이미지를 추가할 제작 기준" value={importProfileId} onChange={setImportProfileId} disabled={!!busy} options={workspace.profiles.map(profile => ({value:profile.id,label:profile.name,detail:`${profile.pixelSize}px/도트 · ${profile.alphaMode === 'binary' ? '이진 알파' : '알파 보존'}`}))} /></DetailPanel>{intakeOptions}<p className="selection-help">Shift로 범위 · {isMac ? '⌘' : 'Ctrl'}로 여러 개 선택</p></div>
         </aside>
-        {workspace.assets.length ? <Preview workspace={workspace} asset={active} onActive={setActiveId} /> : <section className="preview-region intake-canvas">{intakeContent}</section>}
+        {workspace.assets.length ? <Preview workspace={workspace} asset={active} onActive={id => { setActiveId(id); setSelectedIds(previous => previous.length <= 1 ? [id] : previous); }} /> : <section className="preview-region intake-canvas">{intakeContent}</section>}
         <ReviewPanel workspace={workspace} asset={active} selectedIds={selectedIds} busy={!!busy} run={runWorkspace} reportError={reportError} onRunning={setAiRunning} onDirty={handleReviewDirty} request={reviewQueue[0] ?? null} onRequestHandled={handleRequestHandled} onOpenModelSettings={openModelSettings} />
       </div>
       <div hidden={screen !== 'rules'} className="screen"><Profiles workspace={workspace} busy={!!busy} run={runWorkspace} runAction={runAction} onDirty={handleRulesDirty} onSelectAsset={selectAsset} /></div>
       <div hidden={screen !== 'handoff'} className="screen"><Handoff workspace={workspace} selectedIds={selectedIds} setSelectedIds={setSelectedIds} busy={!!busy} run={runAction} /></div>
     </div>}
     {(busy || notice) && <div className="activity-toast" role="status">{busy ? <><LoaderCircle size={14} className="spin" /><span>{busy}</span></> : <><Check size={14} /><span>{notice}</span><button className="icon-button" aria-label="알림 닫기" onClick={() => setNotice('')}><X size={13} /></button></>}</div>}
-    {dragging && <div className="drop-overlay"><ImagePlus size={30} /><strong>PNG를 놓아 검토 시작</strong><span>{workspace ? '원본 보관 · 로컬 파일 자동 검사' : '저장할 프로젝트를 만든 뒤 이미지를 추가합니다.'}</span><small>{autoReview ? '추가 후 Codex AI 검토 실행' : 'AI에 전송하지 않습니다.'}</small></div>}
+    {dragging && <div className="drop-overlay"><ImagePlus size={30} /><strong>놓으면 {intakeMode === 'inspect' ? '로컬 검사' : intakeMode === 'cutout' ? '누끼와 기준 정리' : intakeMode === 'review' ? '기준 정리 후 AI 검토' : '기준 정리'}</strong><span>{workspace ? '원본 보관 · 새 결과는 미승인' : '프로젝트를 만든 뒤 선택한 흐름을 실행합니다.'}</span><small>{autoReview ? 'Codex 전송 · 계정 사용량 소비' : '이미지를 외부로 전송하지 않습니다.'}</small></div>}
     {settingsModal && !pendingSwitch && <div className="modal-backdrop"><section className="modal settings-modal" role="dialog" aria-modal="true" aria-labelledby="settings-title"><div className="modal-heading"><div><h2 id="settings-title">Codex 모델 설정</h2><p>저장한 설정은 다음 AI 검토에 적용됩니다.</p></div><button className="icon-button" aria-label="모델 설정 닫기" onClick={() => setSettingsModal(false)}><X size={17} /></button></div><ModelSettings {...modelSettings} /></section></div>}
     {createModal && !pendingSwitch && <div className="modal-backdrop"><form className="modal create-modal" role="dialog" aria-modal="true" aria-labelledby="create-title" onSubmit={e => { e.preventDefault(); void createProject(); }}><div className="modal-heading"><h2 id="create-title">{queuedPaths.length ? '이미지를 보관할 프로젝트' : '새 프로젝트'}</h2><button className="icon-button" type="button" aria-label="프로젝트 만들기 취소" disabled={!!busy} onClick={cancelCreate}><X size={17} /></button></div>{queuedPaths.length > 0 && <p className="queued-import"><ImagePlus size={16} /><span>선택한 PNG {queuedPaths.length}개 · 만든 뒤 자동으로 추가</span></p>}<p className="helper">선택한 위치에 프로젝트 전용 폴더를 만듭니다. 원본과 기존 파일은 덮어쓰지 않습니다.</p><Field label="프로젝트 이름"><input autoFocus value={projectName} onChange={e => { setProjectName(e.target.value); setCreateError(''); }} disabled={!!busy} /></Field>{createError && <p className="inline-error" role="alert">{createError}</p>}<div className="form-actions"><button className="button primary" type="submit" disabled={!!busy}><FolderOpen size={15} />저장 위치 선택 · 만들기</button><button className="button quiet" type="button" disabled={!!busy} onClick={cancelCreate}>취소</button></div></form></div>}
     {pendingSwitch && <div className="modal-backdrop"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="unsaved-title">

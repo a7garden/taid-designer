@@ -16,10 +16,12 @@ use uuid::Uuid;
 mod delivery;
 mod session;
 pub use session::{recent_projects, RecentProject};
+mod automation;
 mod palette;
 mod pixels;
 mod tile;
 mod variants;
+pub use automation::{AutomationItem, AutomationPlan};
 pub use palette::{read_palette_file, PaletteColor, PaletteOutside, PaletteReport};
 pub use tile::{TileAnchor, TileMode, TileSettings};
 #[cfg(test)]
@@ -96,6 +98,10 @@ pub struct Asset {
     pub file_path: String,
     pub original_hash: String,
     pub current_hash: String,
+    #[serde(default)]
+    pub parent_id: Option<String>,
+    #[serde(default)]
+    pub parent_hash: Option<String>,
     pub profile_id: String,
     pub sequence: String,
     pub frame_index: u32,
@@ -989,6 +995,8 @@ impl Project {
                     original_path,
                     current_hash: original_hash.clone(),
                     original_hash,
+                    parent_id: None,
+                    parent_hash: None,
                     profile_id: profile_id.into(),
                     sequence,
                     frame_index,
@@ -1494,4 +1502,20 @@ pub fn assets_tile(
     settings: TileSettings,
 ) -> Result<Workspace> {
     state.tile_assets(&asset_ids, &settings)
+}
+
+#[tauri::command]
+pub fn automation_plan(
+    state: tauri::State<'_, EngineState>,
+    asset_ids: Vec<String>,
+) -> Result<AutomationPlan> {
+    state.automation_plan(&asset_ids)
+}
+
+#[tauri::command]
+pub fn assets_auto_prepare(
+    state: tauri::State<'_, EngineState>,
+    asset_ids: Vec<String>,
+) -> Result<Workspace> {
+    state.auto_prepare(&asset_ids)
 }

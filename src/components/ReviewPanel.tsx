@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AlertTriangle, Check, CheckCheck, Copy, RefreshCw, Send, Settings2, Square } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import type { AppSettings, Asset, CodexModel, CodexStatus, Workspace } from '../domain';
+import type { AppSettings, Asset, AutomationPlan, CodexModel, CodexStatus, Workspace } from '../domain';
 import * as api from '../bridge';
 import { buildReviewPrompt, reviewAssets, reviewScopeError, reviewSnapshot } from '../review';
 import { Inspector } from './Inspector';
@@ -9,6 +9,7 @@ import { CutoutControl } from './CutoutControl';
 import { PaletteTools } from './PaletteTools';
 import { TileTools } from './TileTools';
 import { Empty, errorMessage, Field, formatNumber } from './ui';
+import { Choice, DetailPanel } from './Interaction';
 import type { WorkspaceAction } from './ui';
 
 export interface ReviewRequest { id: number; assetIds: string[]; }
@@ -40,6 +41,8 @@ export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportEr
   const [review, setReview] = useState<Review | null>(null);
   const [notice, setNotice] = useState('');
   const [copyNotice, setCopyNotice] = useState('');
+  const [preparation, setPreparation] = useState<{ workspace: Workspace; ids: string; plan?: AutomationPlan; error?: string }>();
+  const [preparationNotice, setPreparationNotice] = useState('');
   const mounted = useRef(false);
   const runningRef = useRef(false);
   const refreshingRef = useRef(false);
@@ -103,6 +106,21 @@ export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportEr
   useEffect(() => { onDirty(inspectorDirty || paletteDirty || tileDirty || question !== sentQuestion); }, [inspectorDirty, paletteDirty, tileDirty, question, sentQuestion, onDirty]);
 
   const targetIds = selectedIds.length ? selectedIds : asset ? [asset.id] : [];
+  const targetKey = JSON.stringify(targetIds);
+  const currentPreparation = preparation?.workspace === workspace && preparation.ids === targetKey ? preparation : undefined;
+  const preparationPlan = currentPreparation?.plan;
+  const preparationSteps = [...new Set(preparationPlan?.items.flatMap(item => item.steps) ?? [])];
+  const preparationWarnings = [...new Set(preparationPlan?.items.flatMap(item => item.warnings) ?? [])];
+  useEffect(() => {
+    if (targetKey === '[]') return;
+    let cancelled = false;
+    api.automationPlan(JSON.parse(targetKey) as string[]).then(plan => {
+      if (!cancelled) setPreparation({ workspace, ids: targetKey, plan });
+    }).catch(error => {
+      if (!cancelled) setPreparation({ workspace, ids: targetKey, error: errorMessage(error) });
+    });
+    return () => { cancelled = true; };
+  }, [workspace, targetKey]);
   const targets = reviewAssets(workspace, targetIds);
   const scopeError = reviewScopeError(workspace, targetIds);
   const modelLabel = settings ? `${models.find(model => model.id === settings.model)?.displayName || settings.model || 'Codex 기본 모델'} · ${settings.effort}` : '모델 설정 확인 중';
@@ -205,30 +223,50 @@ export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportEr
     if (await run('AI 검토를 현재 에셋 메모에 추가', () => api.updateAsset(asset.id, { notes: [asset.notes, addition].filter(Boolean).join('\n\n') }))) setCopyNotice('현재 에셋 메모에 저장했습니다. 메모 변경으로 QC 재승인이 필요합니다.');
   }
 
+  async function autoPrepare() {
+    if (busy || running || !preparationPlan || !preparationPlan.changedCount || preparationPlan.blocked.length) return;
+    const count = preparationPlan.changedCount;
+    if (await run('기준에 맞춰 정리', () => api.autoPrepareAssets(targetIds))) {
+      setPreparationNotice(`새 미승인 결과 ${count}개 생성`);
+    }
+  }
+
   return <aside className="review-dock" aria-label="이미지 검토">
     <header className="review-heading"><h2 title={asset?.name}>{asset?.name ?? '에셋'}</h2>{asset && <span>{asset.width} × {asset.height}</span>}</header>
     <div className="review-tabs" role="tablist" aria-label="검토와 에셋 도구">
       {([['review', '검토'], ['tools', '정리'], ['resource', '정보']] as const).map(([id, label]) => <button key={id} id={`review-tab-${id}`} role="tab" aria-selected={tab === id} aria-controls={`review-panel-${id}`} className={tab === id ? 'active' : ''} onClick={() => setTab(id)}>{label}{((id === 'resource' && inspectorDirty) || (id === 'tools' && (inspectorDirty || paletteDirty || tileDirty))) && <span className="dirty-dot" aria-label="저장 전 편집 있음" />}</button>)}
     </div>
     <div className="review-body" id={`review-panel-${tab}`} role="tabpanel" aria-labelledby={`review-tab-${tab}`}>
+      <section className="profile-preparation" hidden={tab === 'resource'} aria-label="기준에 맞춰 정리">
+        <div className="review-section-heading"><h3>기준에 맞춰 정리</h3><span className="muted">{selectedIds.length ? '선택' : '현재'} {targetIds.length}개 · 로컬</span></div>
+        {!targetIds.length ? <p className="helper">정리할 이미지를 선택하세요.</p> : !currentPreparation ? <p className="helper" role="status">저장된 제작 기준과 필요한 처리를 확인 중…</p> : currentPreparation.error ? <p className="inline-error" role="alert">{currentPreparation.error}</p> : preparationPlan && <>
+          {preparationSteps.length > 0 && <p className="preparation-summary">감지된 {preparationSteps.length}가지 처리를 한 번에 적용합니다.</p>}
+          {preparationWarnings.length > 0 && <p className="tool-caution">일부 도트·색·반투명 표현이 달라지거나 사라질 수 있습니다.</p>}
+          {preparationPlan.changedCount > 0 && <DetailPanel title={`처리 계획 · 새 결과 ${preparationPlan.changedCount}개`}><ul className="preparation-items">{preparationPlan.items.map(item => <li key={item.assetId}><h3>{item.name}.png</h3><p>{item.outputWidth} × {item.outputHeight}px · {item.steps.join(' → ') || '변경 없음'}</p>{item.warnings.map(warning => <p key={warning}>{warning}</p>)}</li>)}</ul><p>원본·이전 결과·저장 전 편집은 유지합니다. 고립 도트와 그림 품질은 직접 검수하며 자동 승인하지 않습니다.</p></DetailPanel>}
+          {preparationPlan.blocked.length > 0 && <ul className="preparation-blocked inline-error" role="alert">{preparationPlan.blocked.map((reason, index) => <li key={index}>{reason}</li>)}</ul>}
+          {!preparationPlan.changedCount && !preparationPlan.blocked.length ? <p className="inspection-clear" role="status"><Check size={15} />설정된 규격에서 변경할 항목 없음</p> : <button className="button primary full" disabled={busy || running || !preparationPlan.changedCount || !!preparationPlan.blocked.length} onClick={() => void autoPrepare()}>기준에 맞춰 정리 · {preparationPlan.changedCount}개</button>}
+          {preparationPlan.changedCount > 0 && <p className="helper">새 미승인 결과 · 원본 보존 · 이미지 전송 없음</p>}
+        </>}
+        {preparationNotice && <p className="tool-success" role="status">{preparationNotice}</p>}
+      </section>
       <div hidden={tab !== 'review'}>
         {!asset ? <Empty title="이미지를 선택하세요"><p>가져온 파일의 로컬 검사와 AI 검토를 여기서 확인합니다.</p></Empty> : <section className="local-checks">
           <div className="review-section-heading"><h3>파일 검사</h3><span className="muted">로컬 · 자동</span></div>
           <p className="review-state" data-state={activeReview?.phase || 'local'} aria-live="polite">{stateLabel}</p>
           <p className="local-check-summary">{workspace.profiles.find(profile => profile.id === asset.profileId)?.name ?? '제작 기준 없음'}</p>
-          {asset.issues.length ? <details className="local-issue-details" open={errors.length > 0 || undefined}><summary><AlertTriangle size={14} />{errors.length ? `오류 ${errors.length}개` : '오류 없음'}{warnings.length ? ` · 주의 ${warnings.length}개` : ''}<span>상세</span></summary><ul className="issue-list">{asset.issues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}><div className="issue-title"><strong>{issue.severity === 'error' ? '오류' : '주의'}</strong><code>{issue.code}</code></div><p>{issue.message}</p>{issue.pixels > 0 && <span>{formatNumber(issue.pixels)} {issue.code === 'palette-variants' ? '색상 변형' : issue.code === 'isolated-dots' ? '논리 도트' : '픽셀'} · 로컬 측정</span>}</li>)}</ul></details> : <p className="inspection-clear"><Check size={15} />파일 규칙 통과</p>}
+          {asset.issues.length ? <DetailPanel title={`${errors.length ? `오류 ${errors.length}개` : '오류 없음'}${warnings.length ? ` · 주의 ${warnings.length}개` : ''} · 검사 상세`}><ul className="issue-list">{asset.issues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}><div className="issue-title"><strong>{issue.severity === 'error' ? '오류' : '주의'}</strong><code>{issue.code}</code></div><p>{issue.message}</p>{issue.pixels > 0 && <span>{formatNumber(issue.pixels)} {issue.code === 'palette-variants' ? '색상 변형' : issue.code === 'isolated-dots' ? '논리 도트' : '픽셀'} · 로컬 측정</span>}</li>)}</ul></DetailPanel> : <p className="inspection-clear"><Check size={15} />파일 규칙 통과</p>}
           {errors.some(issue => issue.code === 'grid' || issue.code === 'alpha' || issue.code === 'palette') && <button className="button small" onClick={() => { setTool(errors.some(issue => issue.code === 'grid' || issue.code === 'alpha') ? 'pixel' : 'palette'); setTab('tools'); }}>정리 도구 열기</button>}
-          <details className="technical-details"><summary>실제 픽셀 검사 수치</summary><p className="helper">크기·알파·팔레트·픽셀 규칙 검사입니다. 그림의 스타일이나 형태를 AI가 판단한 결과는 아닙니다.</p><dl className="metrics-list"><div><dt>사용 색상</dt><dd>{formatNumber(asset.metrics.colors)}</dd></div><div><dt>반투명 픽셀</dt><dd>{formatNumber(asset.metrics.semiTransparent)}</dd></div><div><dt>불투명 픽셀</dt><dd>{formatNumber(asset.metrics.opaque)}</dd></div><div><dt>그리드 이탈 픽셀</dt><dd>{formatNumber(asset.metrics.gridViolations)}</dd></div></dl></details>
-          <details className="technical-details pixel-guide"><summary>픽셀아트 검수 가이드</summary><ol><li>먼저 제작 기준의 도트 크기와 실제 격자를 맞춥니다.</li><li>승인 팔레트와 사용 색을 대조합니다. 색 수 자체가 합격·불합격 기준은 아닙니다.</li><li>고립 도트는 잡티 후보입니다. 눈·별·하이라이트·수동 안티앨리어싱은 의도한 표현일 수 있습니다.</li><li>1× 보기와 다른 에셋 위에서 비교합니다. 실제 게임 표시 크기는 Unity에서도 확인하세요.</li></ol><dl className="metrics-list"><div><dt>RGB444 근사 색상 변형</dt><dd>{formatNumber(asset.metrics.nearColorVariants ?? 0)}</dd></div><div><dt>고립 색상 도트 후보</dt><dd>{asset.metrics.orphanCheckApplied ? `${formatNumber(asset.metrics.isolatedColorDots ?? 0)} / ${formatNumber(asset.metrics.visibleLogicalDots ?? 0)}도트` : '격자 정리 후 검사'}</dd></div></dl><p className="helper">RGB444는 가까운 색을 묶는 근사 지표이며 지각적 유사도나 그림 품질 판정이 아닙니다. 참고: Imagine Dev 「이 픽셀아트, 사실 가짜입니다」.</p></details>
+          <DetailPanel title="실제 픽셀 검사 수치"><p className="helper">크기·알파·팔레트·픽셀 규칙 검사입니다. 그림의 스타일이나 형태를 AI가 판단한 결과는 아닙니다.</p><dl className="metrics-list"><div><dt>사용 색상</dt><dd>{formatNumber(asset.metrics.colors)}</dd></div><div><dt>반투명 픽셀</dt><dd>{formatNumber(asset.metrics.semiTransparent)}</dd></div><div><dt>불투명 픽셀</dt><dd>{formatNumber(asset.metrics.opaque)}</dd></div><div><dt>그리드 이탈 픽셀</dt><dd>{formatNumber(asset.metrics.gridViolations)}</dd></div></dl></DetailPanel>
+          <DetailPanel title="픽셀아트 검수 가이드"><ol><li>먼저 제작 기준의 도트 크기와 실제 격자를 맞춥니다.</li><li>승인 팔레트와 사용 색을 대조합니다. 색 수 자체가 합격·불합격 기준은 아닙니다.</li><li>고립 도트는 잡티 후보입니다. 눈·별·하이라이트·수동 안티앨리어싱은 의도한 표현일 수 있습니다.</li><li>1× 보기와 다른 에셋 위에서 비교합니다. 실제 게임 표시 크기는 Unity에서도 확인하세요.</li></ol><dl className="metrics-list"><div><dt>RGB444 근사 색상 변형</dt><dd>{formatNumber(asset.metrics.nearColorVariants ?? 0)}</dd></div><div><dt>고립 색상 도트 후보</dt><dd>{asset.metrics.orphanCheckApplied ? `${formatNumber(asset.metrics.isolatedColorDots ?? 0)} / ${formatNumber(asset.metrics.visibleLogicalDots ?? 0)}도트` : '격자 정리 후 검사'}</dd></div></dl><p className="helper">RGB444는 가까운 색을 묶는 근사 지표이며 지각적 유사도나 그림 품질 판정이 아닙니다. 참고: Imagine Dev 「이 픽셀아트, 사실 가짜입니다」.</p></DetailPanel>
         </section>}
         <section className="ai-review">
           <div className="review-section-heading"><h3>AI 이미지 검토</h3><button className="icon-button" disabled={busy || running || refreshing} aria-label="Codex 연결과 모델 상태 새로고침" title="연결 상태 새로고침" onClick={() => void refresh()}><RefreshCw size={14} /></button></div>
           <button className="review-model" disabled={running || busy} onClick={onOpenModelSettings}><Settings2 size={14} /><span>{modelLabel}</span></button>
           <div className="review-disclosure">
             <p>{selectedIds.length ? '선택' : '현재'} {targetIds.length}개와 저장된 기준을 Codex에 전송 · 계정 사용량 소비</p>
-            <details className="review-send-details"><summary>전송 내용·대상</summary><ul className="review-attachments">{targets.map((item, index) => <li key={`${item.id}-${index}`}><span>{index + 1}.</span> {item.name}.png <small>{workspace.profiles.find(profile => profile.id === item.profileId)?.name ?? '기준 없음'}</small></li>)}</ul><p className="helper">이미지·저장된 기준·파일명·해시·프레임·피벗·메모·파일 검사 수치·추가 질문을 기존 Codex 제공자에게 보냅니다. 저장 전 편집은 제외합니다. 사용량·과금은 기존 계정 설정을 따르며 파일 수정·생성·자동 승인은 없습니다.</p></details>
+            <DetailPanel title="전송 내용·대상"><ul className="review-attachments">{targets.map((item, index) => <li key={`${item.id}-${index}`}><span>{index + 1}.</span> {item.name}.png <small>{workspace.profiles.find(profile => profile.id === item.profileId)?.name ?? '기준 없음'}</small></li>)}</ul><p className="helper">이미지·저장된 기준·파일명·해시·프레임·피벗·메모·파일 검사 수치·추가 질문을 기존 Codex 제공자에게 보냅니다. 저장 전 편집은 제외합니다. 사용량·과금은 기존 계정 설정을 따르며 파일 수정·생성·자동 승인은 없습니다.</p></DetailPanel>
           </div>
-          <details className="review-question-details" open={!!question || undefined}><summary>추가 검토 질문 (선택)</summary><Field label="추가 질문" className="review-question"><textarea rows={2} value={question} disabled={running} onChange={event => setQuestion(event.target.value)} placeholder="예: 달리기 프레임 사이에 팔 길이가 달라 보이는지" /></Field>{question && <button className="button small" disabled={running} onClick={() => { setQuestion(''); setSentQuestion(''); }}>추가 질문 지우기</button>}</details>
+          <DetailPanel title={`추가 검토 질문${question ? ' · 입력됨' : ' (선택)'}`}><Field label="추가 질문" className="review-question"><textarea rows={2} value={question} disabled={running} onChange={event => setQuestion(event.target.value)} placeholder="예: 달리기 프레임 사이에 팔 길이가 달라 보이는지" /></Field>{question && <button className="button small" disabled={running} onClick={() => { setQuestion(''); setSentQuestion(''); }}>추가 질문 지우기</button>}</DetailPanel>
           <div className="review-connection">
             {!status && !connectionError && <p className="helper">Codex 설치·로그인 상태 확인 중…</p>}
             {status && !status.authenticated && <p className="helper">Codex 계정 연결 필요</p>}
@@ -260,10 +298,10 @@ export function ReviewPanel({ workspace, asset, selectedIds, busy, run, reportEr
             <button className={`button approval-button ${allQc ? 'approved' : ''}`} disabled={busy || approvalBlocked || (!allQc && !!qcReason)} onClick={() => void run('선택 이미지 QC 승인 변경', () => api.approveAssets(targetIds, true, !allQc))}><CheckCheck size={15} />{allQc ? 'QC 승인됨' : 'QC 승인'}</button>
           </div>
           {qcReason && <p className="helper compact">{qcReason}</p>}
-          <details className="technical-details"><summary>승인 대상·안내</summary><p className="helper">{targets.map(item => `${item.name}.png`).join(', ') || '이미지를 선택하세요.'}</p><p className="helper">그림·움직임과 파일 규칙을 각각 확인하세요. 승인된 버튼을 다시 누르면 취소합니다. 디자인 승인을 바꾸면 QC 승인이 해제됩니다. 참고용 이미지는 승인·전달에서 제외합니다.</p></details>
+          <DetailPanel title="승인 대상·안내"><p className="helper">{targets.map(item => `${item.name}.png`).join(', ') || '이미지를 선택하세요.'}</p><p className="helper">그림·움직임과 파일 규칙을 각각 확인하세요. 승인된 버튼을 다시 누르면 취소합니다. 디자인 승인을 바꾸면 QC 승인이 해제됩니다. 참고용 이미지는 승인·전달에서 제외합니다.</p></DetailPanel>
         </section>
       </div>
-      <div className="tool-picker" hidden={tab !== 'tools'}><label htmlFor="asset-tool">작업</label><select id="asset-tool" value={tool} onChange={event => setTool(event.target.value as typeof tool)}><option value="pixel">도트 정리</option><option value="tile">크기 맞춤</option><option value="palette">색상 맞춤</option><option value="cutout">배경 제거</option></select></div>
+      <div className="tool-picker" hidden={tab !== 'tools'}><Choice label="수동 정리 도구" value={tool} onChange={setTool} options={[{ value: 'pixel', label: '도트 정리' }, { value: 'tile', label: '크기 맞춤' }, { value: 'palette', label: '색상 맞춤' }, { value: 'cutout', label: '배경 제거' }]} /></div>
       <div className="review-advanced" hidden={tab !== 'resource' && (tab !== 'tools' || tool !== 'pixel')}>
         <Inspector workspace={workspace} asset={asset} selectedIds={selectedIds} busy={busy || running} run={run} onDirty={setInspectorDirty} mode={tab === 'resource' ? 'resource' : 'process'} />
       </div>

@@ -49,6 +49,8 @@ pub fn run() {
             engine::asset_palette,
             engine::assets_palette_map,
             engine::assets_tile,
+            engine::automation_plan,
+            engine::assets_auto_prepare,
             engine::palette_read,
             codex::codex_status,
             codex::codex_start,

@@ -219,6 +219,19 @@ jobs:
           finally { $tileSource.Dispose(); $tileResult.Dispose() }
           if ((Get-FileHash -LiteralPath $tileAsset.filePath -Algorithm SHA256).Hash -ne $tileHash) { throw 'Palette/tile operations modified the original parent PNG.' }
           Write-Host 'Synthetic cutout (real pinned model), palette inspect/import/map and exact 2x nearest-neighbor tile smoke passed.'
+          $preparePlan = Invoke-Taid -Arguments @('--project', $project, 'prepare', '--ids', $tileAsset.id, '--plan')
+          if ($preparePlan.data.changedCount -ne 1 -or @($preparePlan.data.blocked).Count -ne 0) { throw 'Profile automation did not plan the actual outside-palette correction.' }
+          $beforePrepareIds = @($tiled.data.assets | ForEach-Object { $_.id })
+          $prepared = Invoke-Taid -Arguments @('--project', $project, 'prepare', '--ids', $tileAsset.id)
+          $preparedAssets = @($prepared.data.assets | Where-Object { $_.id -notin $beforePrepareIds })
+          if ($preparedAssets.Count -ne 1) { throw 'Profile automation did not create exactly one changed variant.' }
+          $preparedAsset = $preparedAssets[0]
+          if ($preparedAsset.parentId -ne $tileAsset.id -or $preparedAsset.parentHash -ne $tileAsset.currentHash -or $preparedAsset.designApproved -or $preparedAsset.qcApproved) { throw 'Profile automation lost its input identity or incorrectly approved a result.' }
+          $preparedPalette = Invoke-Taid -Arguments @('--project', $project, 'palette', 'inspect', '--asset', $preparedAsset.id)
+          if ($preparedPalette.data.outsideColors -ne 0) { throw 'Profile automation did not correct the actual PNG palette.' }
+          $preparedNoop = Invoke-Taid -Arguments @('--project', $project, 'prepare', '--ids', $preparedAsset.id)
+          if ($preparedNoop.data.assets.Count -ne $prepared.data.assets.Count) { throw 'Conforming profile preparation created redundant variants.' }
+          if ((Get-FileHash -LiteralPath $tileAsset.filePath -Algorithm SHA256).Hash -ne $tileHash) { throw 'Profile automation modified the preserved input PNG.' }
           $failurePath = Join-Path $env:RUNNER_TEMP 'taid-expected-error.json'
           $unexpectedOutput = & $cli inspect 2> $failurePath
           if ($LASTEXITCODE -ne 1) { throw 'Missing-project error did not exit 1.' }
@@ -229,7 +242,7 @@ jobs:
             $manifestPath = Join-Path $env:CARGO_TARGET_DIR $relative
             $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
             $manifest.cliRuntimeVerified = $true
-            $manifest | Add-Member -NotePropertyName cliRuntimeVerificationScope -NotePropertyValue 'settings/project/errors; synthetic cutout with pinned real U2Netp; palette inspect/import/map; exact nearest-neighbor tile'
+            $manifest | Add-Member -NotePropertyName cliRuntimeVerificationScope -NotePropertyValue 'settings/project/errors; synthetic cutout with pinned real U2Netp; palette inspect/import/map; exact nearest-neighbor tile; profile preparation plan/execute/no-op and input identity'
             [IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 5) + "`n", [Text.UTF8Encoding]::new($false))
           }
           $global:LASTEXITCODE = 0
@@ -320,7 +333,7 @@ jobs:
           ## Windows x64 artifacts
           - Built natively on GitHub's Windows runner with the MSVC target.
           - Rust library tests, clippy, portable CLI smoke and GUI startup/window/close smoke completed before upload.
-          - CLI exercised owned synthetic PNGs: actual pinned U2Netp cutout (canvas/RGB preserved, foreground/background alpha checked), palette inspect/import/map, and exact 2x nearest-neighbor tile with a scoped 64x64/pixel-size-2 profile.
+          - CLI exercised owned synthetic PNGs: actual pinned U2Netp cutout (canvas/RGB preserved, foreground/background alpha checked), palette inspect/import/map, exact 2x nearest-neighbor tile, and profile preparation plan/execute/no-op with preserved input identity.
           - `Taid-Windows-x64-portable`: GUI, CLI, emitted DLLs, cutout/available third-party notices and SHA-256/PE manifest.
           - `Taid-Windows-x64-installer`: per-user NSIS installer with emitted runtime DLLs and notices; WebView2 download requires internet if the runtime is absent.
           - GUI scope is only startup/window/close with an observed nonzero main-window handle and nonempty title; artwork interactions, installer execution and a clean Windows 10/11 machine remain unverified.

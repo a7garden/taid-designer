@@ -79,6 +79,13 @@ enum Command {
         #[arg(long, default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..=8))]
         scale: u32,
     },
+    /// Prepare CURRENT images to saved rules as new unapproved variants, or inspect a plan.
+    Prepare {
+        #[arg(long, required = true, value_delimiter = ',', value_name = "ID,...")]
+        ids: Vec<String>,
+        #[arg(long, help = "Inspect steps and loss warnings without changing files")]
+        plan: bool,
+    },
     /// Local U2Netp neural cutout into new unapproved variants. First use downloads
     /// 4.4 MiB Apache-2.0 weights; images never leave this machine.
     Cutout {
@@ -361,6 +368,21 @@ fn execute(arguments: Arguments) -> Result<Envelope, String> {
                 },
             )?,
         ),
+        Command::Prepare { ids, plan } => {
+            if plan {
+                success(
+                    "Deterministic preparation plan; no files changed",
+                    engine.automation_plan(&ids)?,
+                    Vec::new(),
+                    &["Blocked items prevent the entire preparation batch. Inspect every loss warning before applying."],
+                )
+            } else {
+                workspace_result(
+                    "Changed images prepared as new unapproved variants; parents preserved",
+                    engine.auto_prepare(&ids)?,
+                )
+            }
+        }
         Command::Cutout { ids } => workspace_result(
             "Local cutout variants created; originals and approvals unchanged",
             crate::cutout::remove(

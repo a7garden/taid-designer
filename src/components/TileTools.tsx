@@ -3,6 +3,7 @@ import { Check } from 'lucide-react';
 import type { Asset, TileSettings, Workspace } from '../domain';
 import * as api from '../bridge';
 import { Field } from './ui';
+import { Choice, DetailPanel } from './Interaction';
 import type { WorkspaceAction } from './ui';
 import '../workbench-tools.css';
 
@@ -59,7 +60,7 @@ export function TileTools({ workspace, asset, selectedIds, busy, run, reportErro
 
   return <section className="tile-tools workbench-tool" aria-label="타일 규격 맞추기">
     <div className="section-heading"><h3>크기 맞춤</h3></div>
-    <Field label="변환 대상"><select value={scope} disabled={busy} onChange={event => setScope(event.target.value as typeof scope)}><option value="current">현재 이미지 {asset ? '1개' : '없음'}</option><option value="selected">선택한 이미지 {selectedIds.length}개</option></select></Field>
+    <Choice label="변환 대상" value={scope} onChange={setScope} disabled={busy} options={[{ value: 'current', label: `현재 이미지 ${asset ? '1개' : '없음'}` }, { value: 'selected', label: `선택한 이미지 ${selectedIds.length}개` }]} />
     <fieldset className="tool-fieldset">
       <legend>논리 캔버스</legend>
       <div className="tile-presets tool-segmented" aria-label="도트 캔버스 프리셋">{[32, 64, 128].map(size => <button className="button" key={size} disabled={busy} aria-pressed={w === size && h === size} onClick={() => { setWidth(String(size)); setHeight(String(size)); }}>{size} × {size}</button>)}</div>
@@ -75,6 +76,7 @@ export function TileTools({ workspace, asset, selectedIds, busy, run, reportErro
         <button className="button" aria-pressed={mode === 'fit'} disabled={busy} onClick={() => setMode('fit')}>캔버스에 맞춤</button>
       </div>
     </fieldset>
+    <Choice label="전체 캔버스 정렬" value={anchor} onChange={setAnchor} disabled={busy} options={[{ value: 'bottom-center', label: '하단 중앙' }, { value: 'center', label: '중앙' }]} />
     <Field label="출력 배율 (px/도트)"><input type="number" min={1} max={64} step={1} value={scale} disabled={busy} onChange={event => setScale(event.target.value)} /></Field>
     <div className="tool-dimensions" aria-live="polite">
       <span>출력 PNG</span><strong>{valid ? `${w * s} × ${h * s} px` : '출력 크기 확인 필요'}</strong>
@@ -82,13 +84,11 @@ export function TileTools({ workspace, asset, selectedIds, busy, run, reportErro
     </div>
     {asset && profile && <p className="tool-inline-note">현재 입력 {inputWidth} × {inputHeight}도트 <span>({asset.width} × {asset.height}px ÷ {profile.pixelSize}px/도트)</span></p>}
     {gridMismatch && <p className="inline-error">변환 대상의 도트 격자가 맞지 않습니다. 제작 기준의 도트 크기를 확인하고 격자 정리를 먼저 적용하세요.</p>}
-    <details className="tool-disclosure">
-      <summary>정렬과 변환 세부사항</summary>
-      <Field label="전체 캔버스 정렬"><select value={anchor} disabled={busy} onChange={event => setAnchor(event.target.value as TileSettings['anchor'])}><option value="bottom-center">하단 중앙</option><option value="center">중앙</option></select></Field>
+    <DetailPanel title="정렬과 변환 세부사항">
       {placed && <p>현재 그림 배치 {placed[0]} × {placed[1]}도트 · 왼쪽 여백 {Math.floor((w - placed[0]) / 2)}도트 · 위쪽 여백 {anchor === 'center' ? Math.floor((h - placed[1]) / 2) : h - placed[1]}도트</p>}
       <p>맞춤 모드에서 작은 그림은 들어가는 최대 정수 배율로 확대하고 남는 공간은 투명 여백으로 채웁니다.</p>
       <p>보이는 영역만 재중앙화하지 않습니다. 전체 캔버스를 기준으로 정렬하고 크기 변화에 맞춰 피벗을 변환합니다. 프레임 시간·레이어·참고용 상태와 제작 기준의 팔레트·알파 정책·단계를 유지합니다.</p>
-    </details>
+    </DetailPanel>
     <div className="tool-action-footer">
       <div className="tool-action-summary"><strong>{scope === 'selected' ? '선택한' : '현재'} 이미지 {ids.length}개 → 새 변형 {ids.length}개</strong><span>새 미승인 PNG와 전용 제작 기준 · 원본과 기존 기준 유지</span></div>
       {mode === 'fit' && oversized && <p className="tool-caution">최근접 도트 선택으로 축소합니다. 색은 늘어나지 않지만 한 도트 세부나 윤곽이 사라질 수 있습니다.</p>}

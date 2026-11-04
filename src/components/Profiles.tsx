@@ -4,6 +4,7 @@ import type { RuleProfile, Workspace } from '../domain';
 import * as api from '../bridge';
 import { buildPrompt, Field, useModalKeyboard } from './ui';
 import type { RunAction, WorkspaceAction } from './ui';
+import { Choice, DetailPanel } from './Interaction';
 import '../workbench-settings.css';
 
 type ProfileDraft = Omit<RuleProfile, 'pixelSize' | 'width' | 'height' | 'alphaThreshold' | 'palette'> & { pixelSize: string; width: string; height: string; alphaThreshold: string; palette: string };
@@ -47,7 +48,7 @@ export function Profiles({ workspace, busy, run, runAction, onDirty, onSelectAss
     <aside className="rules-sidebar">
       <div className="section-heading"><h2>제작 기준</h2><button className="icon-button" title="새 제작 기준" aria-label="새 제작 기준" onClick={newProfile} disabled={busy}><Plus size={17} /></button></div>
       <div className="profile-list">{entries.map(({ value, dirty: changed }) => <button key={value.id} className={selectedId === value.id ? 'active' : ''} aria-current={selectedId === value.id ? 'true' : undefined} onClick={() => { setSelectedId(value.id); setValidation(''); }}><FileText size={16} /><span><strong>{value.name}</strong><small>{value.stage || '단계 미지정'} · {kindNames[value.kind]}</small></span>{changed && <span className="dirty-dot" aria-label="저장 전" />}</button>)}</div>
-      <details className="rule-details"><summary>기준 적용 범위</summary><p className="helper">각 이미지에 지정한 기준만 적용합니다. Stage03의 4×4 논리 픽셀과 1672×944 배경 규격은 다른 단계·종류에 적용하지 않습니다.</p></details>
+      <DetailPanel className="rule-details" title="기준 적용 범위"><p className="helper">각 이미지에 지정한 기준만 적용합니다. Stage03의 4×4 논리 픽셀과 1672×944 배경 규격은 다른 단계·종류에 적용하지 않습니다.</p></DetailPanel>
     </aside>
     <main className="rule-editor scroll-panel">{current && <>
       <header className="profile-save-bar">
@@ -58,28 +59,29 @@ export function Profiles({ workspace, busy, run, runAction, onDirty, onSelectAss
       <div className="profile-form">
         <section className="profile-form-section" aria-label="기본 기준">
           <Field label="기준 이름"><input value={current.name} onChange={e => setField('name', e.target.value)} disabled={busy} /></Field>
-          <div className="field-row"><Field label="단계"><input value={current.stage} onChange={e => setField('stage', e.target.value)} disabled={busy} /></Field><Field label="이미지 종류"><select value={current.kind} onChange={e => setField('kind', e.target.value as RuleProfile['kind'])} disabled={busy}><option value="sprite">스프라이트</option><option value="background">배경</option><option value="ui">UI</option><option value="effect">이펙트</option></select></Field></div>
+          <Field label="단계"><input value={current.stage} onChange={e => setField('stage', e.target.value)} disabled={busy} /></Field>
+          <Choice<RuleProfile['kind']> label="이미지 종류" value={current.kind} onChange={value => setField('kind', value)} options={[{ value: 'sprite', label: '스프라이트' }, { value: 'background', label: '배경' }, { value: 'ui', label: 'UI' }, { value: 'effect', label: '이펙트' }]} disabled={busy} />
           <Field label="논리 픽셀 크기 (px)" hint="1이면 실제 픽셀 단위로 검사합니다."><input type="number" min="1" max="64" step="1" value={current.pixelSize} onChange={e => setField('pixelSize', e.target.value)} disabled={busy} /></Field>
           <div className="field-row"><Field label="너비 (px)" hint="빈칸이면 제한 없음"><input type="number" min="1" max="16384" step="1" value={current.width} onChange={e => setField('width', e.target.value)} disabled={busy} /></Field><Field label="높이 (px)" hint="빈칸이면 제한 없음"><input type="number" min="1" max="16384" step="1" value={current.height} onChange={e => setField('height', e.target.value)} disabled={busy} /></Field></div>
         </section>
-        <details className="rule-details" key={current.id}><summary>투명도·팔레트 <span className="muted">· {current.alphaMode === 'preserve' ? '원본 알파' : '이진 알파'} · {current.palette.trim() ? '팔레트 지정' : '색 제한 없음'}</span></summary>
-          <div className="field-row"><Field label="알파 기준"><select value={current.alphaMode} onChange={e => setField('alphaMode', e.target.value as RuleProfile['alphaMode'])} disabled={busy}><option value="preserve">원본 알파 유지</option><option value="binary">이진 알파</option></select></Field><Field label="알파 임계값 (1–255)"><input type="number" min="1" max="255" step="1" value={current.alphaThreshold} onChange={e => setField('alphaThreshold', e.target.value)} disabled={busy} /></Field></div>
+        <DetailPanel className="rule-details" key={current.id} title={`투명도·팔레트 · ${current.alphaMode === 'preserve' ? '원본 알파' : '이진 알파'} · ${current.palette.trim() ? '팔레트 지정' : '색 제한 없음'}`}>
+          <Choice<RuleProfile['alphaMode']> label="알파 기준" value={current.alphaMode} onChange={value => setField('alphaMode', value)} options={[{ value: 'preserve', label: '원본 알파 유지' }, { value: 'binary', label: '이진 알파' }]} disabled={busy} />
+          <Field label="알파 임계값 (1–255)"><input type="number" min="1" max="255" step="1" value={current.alphaThreshold} onChange={e => setField('alphaThreshold', e.target.value)} disabled={busy} /></Field>
           <Field label="제한 팔레트" hint="#RRGGBB · 줄바꿈 또는 쉼표로 구분 · 빈칸이면 제한 없음"><textarea className="mono" rows={5} value={current.palette} onChange={e => setField('palette', e.target.value)} disabled={busy} spellCheck={false} /></Field>
           <div className="palette-swatches">{current.palette.split(/[\s,;]+/).filter(v => /^#[0-9a-fA-F]{6}$/.test(v)).map((color, i) => <span key={`${color}-${i}`} title={color} style={{ backgroundColor: color }} />)}</div>
-        </details>
-        <details className="rule-details profile-notes-details" key={`notes-${current.id}`}><summary>검토 메모{current.notes.trim() && <span className="muted"> · 작성됨</span>}</summary><Field label="제작 기준 메모" hint="형태·명암·테두리 등 직접 검토할 내용"><textarea rows={4} value={current.notes} onChange={e => setField('notes', e.target.value)} disabled={busy} /></Field></details>
+        </DetailPanel>
+        <DetailPanel className="rule-details profile-notes-details" key={`notes-${current.id}`} title={`검토 메모${current.notes.trim() ? ' · 작성됨' : ''}`}><Field label="제작 기준 메모" hint="형태·명암·테두리 등 직접 검토할 내용"><textarea rows={4} value={current.notes} onChange={e => setField('notes', e.target.value)} disabled={busy} /></Field></DetailPanel>
         <div className="profile-prompt-action"><button className="text-button" disabled={busy || !savedProfile} onClick={() => setPrompt(buildPrompt(savedProfile, workspace.notes))}><Copy size={14} />저장된 기준으로 프롬프트 만들기</button></div>
       </div>
     </>}
       <div className="profile-form">
-        <details className="rule-details project-context">
-          <summary>프로젝트 공통 메모{notesDirty && <span className="dirty-label">저장 전</span>}</summary>
+        <DetailPanel className="rule-details project-context" title={`프로젝트 공통 메모${notesDirty ? ' · 저장 전' : ''}`}>
           <Field label="공통 메모"><textarea rows={5} value={notes} onChange={e => { setNotes(e.target.value); setNotesDirty(true); }} disabled={busy} /></Field>
           <button className="button" disabled={busy || !notesDirty} onClick={() => void run('공통 메모 저장', () => api.saveProjectNotes(notes)).then(ok => { if (ok) setNotesDirty(false); })}><Save size={14} />공통 메모 저장</button>
-        </details>
-        <details className="rule-details project-context"><summary>참고용 이미지 · {workspace.assets.filter(asset => asset.reference).length}개</summary>
+        </DetailPanel>
+        <DetailPanel className="rule-details project-context" title={`참고용 이미지 · ${workspace.assets.filter(asset => asset.reference).length}개`}>
           {workspace.assets.some(a => a.reference) ? <ul className="reference-list">{workspace.assets.filter(a => a.reference).map(a => <li key={a.id}><button onClick={() => onSelectAsset(a.id)}><img src={api.imageUrl(a.filePath, a.currentHash)} alt="" /><span>{a.name}<small>{a.width} × {a.height}</small></span></button></li>)}</ul> : <p className="helper">이미지의 ‘리소스’에서 참고용으로 지정할 수 있습니다.</p>}
-        </details>
+        </DetailPanel>
       </div>
     </main>
     {prompt && <div className="modal-backdrop"><section className="modal prompt-modal" role="dialog" aria-modal="true" aria-labelledby="prompt-title"><h2 id="prompt-title">제작 기준 프롬프트</h2><p className="helper">저장된 기준과 공통 메모로 만든 문구입니다. 복사해도 이미지는 전송하지 않습니다.</p><textarea rows={16} value={prompt} onChange={e => setPrompt(e.target.value)} aria-label="복사할 프롬프트" /><div className="form-actions"><button className="button primary" disabled={busy} onClick={() => void runAction('프롬프트 복사', async () => { await api.copyText(prompt); })}><Copy size={15} />복사</button><button className="button" onClick={() => setPrompt('')}>닫기</button></div></section></div>}

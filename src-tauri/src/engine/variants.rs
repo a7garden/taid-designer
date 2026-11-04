@@ -6,6 +6,7 @@ pub(crate) struct VariantSnapshot {
     revision: Option<String>,
     pub assets: Vec<Asset>,
     profiles: Vec<RuleProfile>,
+    pub(super) remaining_capacity: usize,
 }
 
 pub(super) struct PreparedVariant {
@@ -45,6 +46,21 @@ impl VariantSnapshot {
     pub(super) fn profile(&self, index: usize) -> &RuleProfile {
         &self.profiles[index]
     }
+
+    pub(super) fn retain_changed(&mut self, changed: &[bool]) {
+        let mut index = 0;
+        self.assets.retain(|_| {
+            let keep = changed[index];
+            index += 1;
+            keep
+        });
+        let mut index = 0;
+        self.profiles.retain(|_| {
+            let keep = changed[index];
+            index += 1;
+            keep
+        });
+    }
 }
 
 impl EngineState {
@@ -54,7 +70,7 @@ impl EngineState {
         let _lock = WorkspaceLock::acquire(&project.root)?;
         project.check_revision()?;
         let selected = project.selection(ids)?;
-        if selected.len() > 128 || project.document.assets.len() + selected.len() > MAX_ASSETS {
+        if selected.len() > 128 {
             return Err("변형은 한 번에 128개까지, 프로젝트는 2000개까지 지원합니다.".into());
         }
         let profiles = selected
@@ -68,6 +84,7 @@ impl EngineState {
         Ok(VariantSnapshot {
             root: project.root.clone(),
             revision: project.baseline_sha.clone(),
+            remaining_capacity: MAX_ASSETS.saturating_sub(project.document.assets.len()),
             profiles,
             assets: selected
                 .into_iter()
@@ -207,6 +224,8 @@ impl EngineState {
                     provenance
                 );
                 let mut asset = parent;
+                asset.parent_id = Some(asset.id.clone());
+                asset.parent_hash = Some(asset.current_hash.clone());
                 asset.id = id;
                 asset.name = name;
                 asset.source_name = format!("{}.png", asset.name);
