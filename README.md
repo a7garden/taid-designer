@@ -96,7 +96,7 @@ Node/npm, Rust, Xcode Command Line Tools와 Tauri macOS 빌드 의존성이 필�
 npm ci
 npm run desktop:dev
 # 배포용 앱과 CLI를 함께 빌드
-npm run desktop:build -- --bundles app,dmg --no-sign --no-binary-patching -- --bins --locked
+npm run desktop:build -- --bundles app,dmg --no-sign --no-binary-patching -- --locked
 npm run install:mac
 ```
 

@@ -45,7 +45,7 @@ Push-Location $root
 try {
     $env:CARGO_TARGET_DIR = Join-Path $root '.local/windows-target'
     $arguments = @('run', 'tauri', '--', 'build', '--target', 'x86_64-pc-windows-msvc', '--no-bundle')
-    $arguments += @('--', '--bins', '--locked')
+    $arguments += @('--', '--locked')
     & npm.cmd @arguments
     if ($LASTEXITCODE -ne 0) { throw "Windows build failed with exit code $LASTEXITCODE." }
 

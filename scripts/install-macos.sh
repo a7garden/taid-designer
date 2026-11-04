@@ -9,7 +9,7 @@ skill_link="$HOME/.agents/skills/taid-workbench"
 skill_source="$destination/Contents/Resources/skills/taid-workbench"
 legacy_skill_source="$root/skills/taid-workbench"
 if [[ ! -x "$source_app/Contents/MacOS/taid-designer" || ! -x "$source_app/Contents/MacOS/taid" ]]; then
-  echo 'Build the app and CLI first: npm run desktop:build -- --bundles app,dmg --no-sign --no-binary-patching -- --bins --locked' >&2; exit 1
+  echo 'Build the app and CLI first: npm run desktop:build -- --bundles app,dmg --no-sign --no-binary-patching -- --locked' >&2; exit 1
 fi
 for resource in THIRD_PARTY_NOTICES.md CUTOUT_NOTICE.txt skills/taid-workbench/SKILL.md; do
   if [[ ! -f "$source_app/Contents/Resources/$resource" ]]; then
