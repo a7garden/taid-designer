@@ -33,7 +33,7 @@ jobs:
         shell: pwsh
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.local/windows-target
-      TAID_DATA_DIR: ${{ runner.temp }}/taid-windows-ci-data
+      TAID_DATA_DIR: ${{ github.workspace }}/.local/taid-windows-ci-data
       CARGO_TERM_COLOR: always
 
     steps:
